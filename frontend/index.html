@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Web Threat Detection</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="container">
+  <h1>🛡️ Web Threat Detection System</h1>
+
+ <div class="input-group">
+
+  <textarea
+    id="inputData"
+    placeholder="Paste website URL or HTML source code here"
+  ></textarea>
+
+  <button id="scanBtn" onclick="scan()">Scan Website</button>
+  <button id="clearBtn" onclick="clearForm()">Clear</button>
+
+  <div id="loading" class="loading" style="display:none;">
+    🔄 Scanning, please wait...
+  </div>
+
+</div>
+
+  <!-- Scan Result -->
+  <div id="result" class="result" style="display:none;">
+    <h3>Scan Result</h3>
+    <p><strong>Scan Time:</strong> <span id="scanTime"></span></p>
+
+    <p>
+      <strong>Severity:</strong>
+      <span id="severityIcon"></span>
+      <span id="severity"></span>
+    </p>
+
+    <h4>Risk Explanation</h4>
+    <ul id="riskExplanation"></ul>
+
+    <p><strong>Risk Score:</strong> <span id="riskScore"></span></p>
+
+    <h4>Static Analysis</h4>
+    <ul>
+      <li>Scripts: <span id="scripts"></span></li>
+      <li>Iframes: <span id="iframes"></span></li>
+      <li>Hidden Elements: <span id="hidden"></span></li>
+      <li>Suspicious JS: <span id="jsPatterns"></span></li>
+      <li>Keywords Found: <span id="keywords"></span></li>
+    </ul>
+
+    <h4>VirusTotal</h4>
+    <p>Malicious: <span id="vtMalicious"></span></p>
+    <p>Suspicious: <span id="vtSuspicious"></span></p>
+  </div>
+
+  <!-- Download -->
+  <button id="downloadBtn" onclick="downloadReport()" style="display:none;">
+    Download Report
+  </button>
+
+  <!-- Severity Parameters -->
+ <div class="severity-guide">
+
+  <div class="severity-header" onclick="toggleSeverityGuide()">
+    <h3>🔍 Severity Evaluation Parameters</h3>
+    <span id="severityToggle">➕</span>
+  </div>
+
+  <div id="severityContent" style="display: none;">
+    <table class="severity-table">
+      <thead>
+        <tr>
+          <th>Parameter</th>
+          <th>Safe Range</th>
+          <th>Risk Condition</th>
+          <th>Impact</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="param-scripts">
+          <td>Script Tags</td>
+          <td>0 – 3</td>
+          <td>&gt; 5 scripts</td>
+          <td>Increased attack surface</td>
+        </tr>
+        <tr id="param-hidden">
+          <td>Hidden Elements</td>
+          <td>None</td>
+          <td>Hidden iframe / div</td>
+          <td>Possible cloaking</td>
+        </tr>
+        <tr id="param-iframes">
+          <td>Iframes</td>
+          <td>None</td>
+          <td>External or hidden iframe</td>
+          <td>Background redirection</td>
+        </tr>
+        <tr id="param-keywords">
+          <td>Suspicious Keywords</td>
+          <td>None</td>
+          <td>login, verify, wallet</td>
+          <td>Phishing indicator</td>
+        </tr>
+        <tr id="param-vt">
+          <td>VirusTotal Flags</td>
+          <td>0 detections</td>
+          <td>≥ 1 malicious report</td>
+          <td>Known malicious source</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="severity-note">
+      ℹ️ Severity is calculated using static HTML inspection and reputation checks only.
+    </p>
+  </div>
+
+</div>
+
+
+  <!-- Scan History -->
+  <div class="history">
+    <h3>Scan History</h3>
+    <ul id="historyList"></ul>
+  </div>
+
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
