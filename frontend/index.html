@@ -2,131 +2,1195 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Web Threat Detection</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secunexis — Web Threat Detection SOC Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css" />
+
+  <!-- Enterprise UI & Visualization Libraries -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </head>
 <body>
 
-<div class="container">
-  <h1>🛡️ Web Threat Detection System</h1>
+<!-- Subtle Tactical Ambient Grid Overlay -->
+<div class="ambient-grid" aria-hidden="true"></div>
+<div class="ambient-glow" aria-hidden="true"></div>
 
- <div class="input-group">
+<div class="app-layout">
+  <!-- Mobile Sidebar Overlay -->
+  <div id="sidebarOverlay" class="sidebar-overlay" onclick="toggleSidebar(false)"></div>
 
-  <textarea
-    id="inputData"
-    placeholder="Paste website URL or HTML source code here"
-  ></textarea>
+  <!-- ================= SIDEBAR NAVIGATION ================= -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <div class="brand" onclick="switchView('dashboard')">
+        <div class="brand-icon">
+          <i data-lucide="shield-alert" class="icon-20"></i>
+          <span class="brand-pulse"></span>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">Secunexis</span>
+          <span class="brand-subtitle">SOC Threat Platform</span>
+        </div>
+      </div>
+      <button class="sidebar-close-btn" onclick="toggleSidebar(false)" aria-label="Close sidebar">
+        <i data-lucide="x" class="icon-18"></i>
+      </button>
+    </div>
 
-  <button id="scanBtn" onclick="scan()">Scan Website</button>
-  <button id="clearBtn" onclick="clearForm()">Clear</button>
+    <nav class="sidebar-nav" aria-label="Main Navigation">
+      <div class="nav-section-label">OPERATIONS</div>
+      <a href="#dashboard" class="nav-item active" data-view="dashboard" onclick="switchView('dashboard')">
+        <span class="nav-icon"><i data-lucide="layout-dashboard" class="icon-18"></i></span>
+        <span class="nav-label">Dashboard</span>
+      </a>
 
-  <div id="loading" class="loading" style="display:none;">
-    🔄 Scanning, please wait...
+      <a href="#scanner" class="nav-item" data-view="scanner" onclick="switchView('scanner')">
+        <span class="nav-icon"><i data-lucide="crosshair" class="icon-18"></i></span>
+        <span class="nav-label">New Scan</span>
+        <span class="nav-shortcut">⌘K</span>
+      </a>
+
+      <a href="#history" class="nav-item" data-view="history" onclick="switchView('history')">
+        <span class="nav-icon"><i data-lucide="history" class="icon-18"></i></span>
+        <span class="nav-label">Scan History</span>
+        <span id="historyBadgeCount" class="nav-badge">0</span>
+      </a>
+
+      <div class="nav-section-label">GOVERNANCE</div>
+      <a href="#reports" class="nav-item" data-view="reports" onclick="switchView('reports')">
+        <span class="nav-icon"><i data-lucide="file-text" class="icon-18"></i></span>
+        <span class="nav-label">Reports</span>
+        <span class="badge-phase">Phase 2</span>
+      </a>
+
+      <a href="#settings" class="nav-item" data-view="settings" onclick="switchView('settings')">
+        <span class="nav-icon"><i data-lucide="sliders" class="icon-18"></i></span>
+        <span class="nav-label">Settings</span>
+        <span class="badge-phase">Phase 2</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="system-status-card">
+        <div class="status-pulse-wrap">
+          <span class="status-indicator-dot online"></span>
+          <span class="status-ring"></span>
+        </div>
+        <div class="status-info">
+          <span class="status-title">Detection Engine v2.1</span>
+          <span class="status-sub">Telemetry Active • :3000</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN WORKSPACE ================= -->
+  <div class="main-wrapper">
+    <!-- Top Command Bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-toggle-btn" onclick="toggleSidebar(true)" aria-label="Open sidebar">
+          <i data-lucide="menu" class="icon-20"></i>
+        </button>
+        <div class="view-header-info">
+          <div class="breadcrumb-row">
+            <span class="crumb-root">SOC CONSOLE</span>
+            <i data-lucide="chevron-right" class="icon-12 crumb-sep"></i>
+            <span id="pageBreadcrumb" class="crumb-active">OVERVIEW</span>
+          </div>
+          <h1 id="pageTitle" class="page-title">Security Operations Dashboard</h1>
+          <p id="pageSubtitle" class="page-subtitle">Real-time threat intelligence, DOM inspection, and session telemetry</p>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <div class="topbar-chip" title="VirusTotal v3 Reputation Feed">
+          <span class="chip-dot"></span>
+          <span>VirusTotal v3 Feed</span>
+        </div>
+        <button class="btn btn-primary topbar-cta" onclick="switchView('scanner')">
+          <i data-lucide="radar" class="icon-16"></i>
+          <span>New Scan</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Content Sections Container -->
+    <main class="content-body">
+
+      <!-- ================= SECTION 1: DASHBOARD ================= -->
+      <section id="view-dashboard" class="view-section active">
+
+        <!-- 4 Enterprise KPI Metric Cards -->
+        <div class="stats-grid">
+          <!-- Total Scans -->
+          <div class="stat-card" data-stat="total">
+            <div class="stat-card-top">
+              <span class="stat-card-label">TOTAL SCANS</span>
+              <div class="stat-card-icon icon-primary">
+                <i data-lucide="activity" class="icon-18"></i>
+              </div>
+            </div>
+            <div class="stat-card-middle">
+              <div class="stat-card-value" id="statTotalScans">0</div>
+              <span class="stat-delta neutral" id="statTotalShare">Session</span>
+            </div>
+            <div class="stat-card-footer">
+              <span class="stat-subtext">Recorded in active SOC session</span>
+            </div>
+          </div>
+
+          <!-- Safe Websites -->
+          <div class="stat-card" data-stat="safe">
+            <div class="stat-card-top">
+              <span class="stat-card-label">SAFE TARGETS</span>
+              <div class="stat-card-icon icon-safe">
+                <i data-lucide="shield-check" class="icon-18"></i>
+              </div>
+            </div>
+            <div class="stat-card-middle">
+              <div class="stat-card-value stat-safe" id="statSafeScans">0</div>
+              <span class="stat-delta safe" id="statSafeShare">0%</span>
+            </div>
+            <div class="stat-card-footer">
+              <span class="stat-subtext">Verified clean posture</span>
+            </div>
+          </div>
+
+          <!-- Suspicious Websites -->
+          <div class="stat-card" data-stat="suspicious">
+            <div class="stat-card-top">
+              <span class="stat-card-label">SUSPICIOUS TARGETS</span>
+              <div class="stat-card-icon icon-suspicious">
+                <i data-lucide="alert-triangle" class="icon-18"></i>
+              </div>
+            </div>
+            <div class="stat-card-middle">
+              <div class="stat-card-value stat-suspicious" id="statSuspiciousScans">0</div>
+              <span class="stat-delta suspicious" id="statSuspiciousShare">0%</span>
+            </div>
+            <div class="stat-card-footer">
+              <span class="stat-subtext">Anomalies requiring triage</span>
+            </div>
+          </div>
+
+          <!-- Malicious Websites -->
+          <div class="stat-card" data-stat="malicious">
+            <div class="stat-card-top">
+              <span class="stat-card-label">MALICIOUS TARGETS</span>
+              <div class="stat-card-icon icon-malicious">
+                <i data-lucide="skull" class="icon-18"></i>
+              </div>
+            </div>
+            <div class="stat-card-middle">
+              <div class="stat-card-value stat-malicious" id="statMaliciousScans">0</div>
+              <span class="stat-delta malicious" id="statMaliciousShare">0%</span>
+            </div>
+            <div class="stat-card-footer">
+              <span class="stat-subtext">High-confidence threats</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Threat Analytics Row: Distribution Chart + Session Activity Timeline -->
+        <div class="analytics-grid">
+          <!-- Threat Distribution Chart -->
+          <div class="panel-card threat-analytics-panel">
+            <div class="panel-card-header">
+              <div>
+                <h3 class="panel-card-title">Threat Verdict Distribution</h3>
+                <p class="panel-card-desc">Classification breakdown across session targets</p>
+              </div>
+              <span class="panel-tag">Session Telemetry</span>
+            </div>
+            <div class="panel-card-body">
+              <div id="threatChartEmpty" class="chart-empty-state">
+                <div class="empty-icon-wrap">
+                  <i data-lucide="pie-chart" class="icon-28"></i>
+                </div>
+                <h4>No Telemetry Recorded</h4>
+                <p>Execute a URL or HTML inspection to populate live verdict distribution analytics.</p>
+                <button class="btn btn-sm btn-outline" onclick="switchView('scanner')">Launch Scanner</button>
+              </div>
+
+              <div id="threatChartWrapper" class="chart-wrapper" style="display:none;">
+                <div class="chart-canvas-container">
+                  <canvas id="threatChartCanvas"></canvas>
+                  <div class="donut-center-readout" id="donutCenterReadout">
+                    <span class="donut-center-num" id="donutTotalNum">0</span>
+                    <span class="donut-center-label">TARGETS</span>
+                  </div>
+                  <div id="nativeFallbackChart" class="native-fallback-chart" style="display:none;"></div>
+                </div>
+                <div id="threatChartLegend" class="chart-legend">
+                  <div class="legend-item">
+                    <span class="legend-dot safe"></span>
+                    <span class="legend-label">Safe</span>
+                    <span class="legend-value" id="legendSafeVal">0 (0%)</span>
+                  </div>
+                  <div class="legend-item">
+                    <span class="legend-dot suspicious"></span>
+                    <span class="legend-label">Suspicious</span>
+                    <span class="legend-value" id="legendSuspiciousVal">0 (0%)</span>
+                  </div>
+                  <div class="legend-item">
+                    <span class="legend-dot malicious"></span>
+                    <span class="legend-label">Malicious</span>
+                    <span class="legend-value" id="legendMaliciousVal">0 (0%)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Session Risk Score Timeline Chart -->
+          <div class="panel-card activity-analytics-panel">
+            <div class="panel-card-header">
+              <div>
+                <h3 class="panel-card-title">Session Risk Score Activity</h3>
+                <p class="panel-card-desc">Chronological risk scores (0–100) from actual session scans</p>
+              </div>
+              <div class="panel-header-tags">
+                <span class="panel-tag mono-tag" id="activityScanCount">0 SCANS</span>
+                <span class="panel-tag mono-tag" id="avgRiskBadge">AVG: -- / 100</span>
+              </div>
+            </div>
+            <div class="panel-card-body">
+              <div id="activityChartEmpty" class="chart-empty-state">
+                <div class="empty-icon-wrap">
+                  <i data-lucide="trending-up" class="icon-28"></i>
+                </div>
+                <h4>Awaiting Scan Timeline</h4>
+                <p>Risk trajectory plots automatically as targets are inspected during this session.</p>
+              </div>
+
+              <div id="activityChartWrapper" class="activity-chart-wrapper" style="display:none;">
+                <div class="activity-canvas-container">
+                  <canvas id="activityChartCanvas"></canvas>
+                </div>
+                <div class="activity-chart-footer">
+                  <span class="chart-legend-pill"><span class="legend-dot safe"></span>Safe (0–19)</span>
+                  <span class="chart-legend-pill"><span class="legend-dot suspicious"></span>Suspicious (20–69)</span>
+                  <span class="chart-legend-pill"><span class="legend-dot malicious"></span>Malicious (70–100)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Inspector & Threat Activity Timeline Row -->
+        <div class="dashboard-grid">
+          <!-- Quick Target Inspector -->
+          <div class="panel-card quick-scan-panel">
+            <div class="panel-card-header">
+              <div>
+                <h3 class="panel-card-title">Quick Target Inspector</h3>
+                <p class="panel-card-desc">Immediate URL or HTML payload triage</p>
+              </div>
+              <span class="status-chip online" id="quickEngineChip"><span class="chip-pulse"></span>Engine v2.1 Ready</span>
+            </div>
+            <div class="panel-card-body">
+              <div class="quick-scanner-form">
+                <label for="quickInput" class="input-label">TARGET ENDPOINT OR RAW MARKUP</label>
+                <div class="quick-input-group">
+                  <div class="input-icon-wrap">
+                    <i data-lucide="terminal" class="icon-16"></i>
+                    <input
+                      type="text"
+                      id="quickInput"
+                      class="form-control"
+                      placeholder="https://github.com or paste HTML..."
+                      onkeydown="if(event.key==='Enter') handleQuickScan()"
+                    />
+                  </div>
+                  <button id="quickScanBtn" class="btn btn-primary" onclick="handleQuickScan()">
+                    <span id="quickScanBtnText">Inspect</span>
+                    <i data-lucide="arrow-right" class="icon-15" id="quickScanBtnIcon"></i>
+                  </button>
+                </div>
+
+                <!-- Intuitive Quick Scan Loading & Validation Status -->
+                <div id="quickScanStatus" class="quick-scan-status" style="display:none;">
+                  <div class="quick-status-row">
+                    <i data-lucide="loader-2" class="icon-14 spin-icon" id="quickStatusIcon"></i>
+                    <span id="quickStatusText">Initializing target inspection...</span>
+                  </div>
+                  <div class="quick-progress-track">
+                    <div class="quick-progress-bar" id="quickProgressBar"></div>
+                  </div>
+                </div>
+
+                <div class="quick-presets">
+                  <span class="presets-label">Triage Fixtures:</span>
+                  <button type="button" class="preset-pill" onclick="loadPreset('github')">GitHub.com</button>
+                  <button type="button" class="preset-pill" onclick="loadPreset('google')">Google.com</button>
+                  <button type="button" class="preset-pill" onclick="loadPreset('phishing')">Phishing Test</button>
+                  <button type="button" class="preset-pill" onclick="loadPreset('hidden_pass')">Hidden Form</button>
+                  <button type="button" class="preset-pill" onclick="loadPreset('eval')">Obfuscated JS</button>
+                </div>
+
+                <div class="quick-modules-compact">
+                  <div class="quick-module-badge"><i data-lucide="check-circle-2" class="icon-13"></i><span>DOM &amp; Credential Harvester</span></div>
+                  <div class="quick-module-badge"><i data-lucide="check-circle-2" class="icon-13"></i><span>JS Obfuscation &amp; Keylogger</span></div>
+                  <div class="quick-module-badge"><i data-lucide="check-circle-2" class="icon-13"></i><span>Cross-Domain POST Check</span></div>
+                  <div class="quick-module-badge"><i data-lucide="check-circle-2" class="icon-13"></i><span>VirusTotal v3 Feed</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Real-Time Threat Activity Timeline (Enterprise SOC Event Stream) -->
+          <div class="panel-card timeline-panel">
+            <div class="panel-card-header">
+              <div>
+                <h3 class="panel-card-title">Threat Activity Timeline</h3>
+                <p class="panel-card-desc">Enterprise SOC security event stream &amp; audit trail</p>
+              </div>
+              <div class="timeline-header-actions">
+                <select id="timelineVerdictFilter" class="timeline-filter-select" aria-label="Filter events by verdict">
+                  <option value="">All Verdicts</option>
+                  <option value="SAFE">Safe</option>
+                  <option value="SUSPICIOUS">Suspicious</option>
+                  <option value="MALICIOUS">Malicious</option>
+                  <option value="INCONCLUSIVE">Inconclusive</option>
+                </select>
+                <button id="timelineRefreshBtn" class="btn btn-xs btn-ghost timeline-refresh-btn" title="Refresh SOC Events">
+                  <i data-lucide="rotate-cw" class="icon-12"></i>
+                </button>
+                <span class="panel-tag mono-tag" id="timelineCountTag">0 EVENTS</span>
+              </div>
+            </div>
+            <div class="panel-card-body">
+              <!-- Loading State -->
+              <div id="threatTimelineLoading" class="chart-empty-state timeline-state timeline-loading" style="display:none;">
+                <div class="soc-pulse-spinner"></div>
+                <h4>Querying SOC Event Stream</h4>
+                <p>Retrieving chronological telemetry from /api/soc/events...</p>
+              </div>
+
+              <!-- Error State -->
+              <div id="threatTimelineError" class="chart-empty-state timeline-state timeline-error" style="display:none;">
+                <div class="empty-icon-wrap error-icon-wrap">
+                  <i data-lucide="alert-triangle" class="icon-28"></i>
+                </div>
+                <h4>SOC Event Stream Offline</h4>
+                <p id="timelineErrorMsg">Unable to retrieve security events from backend service.</p>
+                <button class="btn btn-sm btn-outline timeline-retry-btn" id="timelineRetryBtn">
+                  <i data-lucide="rotate-cw" class="icon-12"></i> Retry Connection
+                </button>
+              </div>
+
+              <!-- Empty State -->
+              <div id="threatTimelineEmpty" class="chart-empty-state timeline-state timeline-empty">
+                <div class="empty-icon-wrap">
+                  <i data-lucide="shield-check" class="icon-28"></i>
+                </div>
+                <h4>No SOC Events Found</h4>
+                <p>Completed scans are indexed chronologically with verdict, score, and detection evidence.</p>
+              </div>
+
+              <!-- Event Stream List -->
+              <div id="threatTimelineList" class="threat-timeline-list" data-lenis-prevent style="display:none;">
+                <!-- Populated dynamically from /api/soc/events -->
+              </div>
+
+              <!-- Pagination Footer -->
+              <div id="threatTimelinePagination" class="timeline-pagination" style="display:none;">
+                <button id="timelinePrevBtn" class="btn btn-xs btn-ghost timeline-page-btn" title="Previous Page" disabled>
+                  <i data-lucide="chevron-left" class="icon-12"></i> Prev
+                </button>
+                <span id="timelinePageInfo" class="timeline-page-info mono-tag">Page 1 of 1</span>
+                <button id="timelineNextBtn" class="btn btn-xs btn-ghost timeline-page-btn" title="Next Page" disabled>
+                  Next <i data-lucide="chevron-right" class="icon-12"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Scans Table Preview -->
+        <div class="panel-card table-panel">
+          <div class="panel-card-header">
+            <div>
+              <h3 class="panel-card-title">Recent Threat Inspections</h3>
+              <p class="panel-card-desc">Latest scanned targets recorded in session telemetry</p>
+            </div>
+            <button class="btn btn-sm btn-ghost" onclick="switchView('history')">
+              <span>View Full Audit Log</span>
+              <i data-lucide="chevron-right" class="icon-14"></i>
+            </button>
+          </div>
+          <div class="panel-card-body p-0">
+            <div class="table-responsive" data-lenis-prevent>
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Target / Input</th>
+                    <th>Scan Timestamp</th>
+                    <th>Severity</th>
+                    <th>Security Verdict</th>
+                    <th class="text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="dashboardRecentTableBody">
+                  <!-- Populated by JavaScript -->
+                </tbody>
+              </table>
+            </div>
+            <div id="dashboardTableEmpty" class="table-empty-state">
+              <i data-lucide="radar" class="icon-28"></i>
+              <p>No recent scans found. Start by inspecting a website URL or HTML payload.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Severity Evaluation Parameters Card (Collapsible) -->
+        <div class="severity-guide panel-card">
+          <div class="severity-header" onclick="toggleSeverityGuide()">
+            <div class="severity-title-wrap">
+              <span class="severity-badge-icon">
+                <i data-lucide="book-open" class="icon-18"></i>
+              </span>
+              <div>
+                <h3 class="panel-card-title">Severity Evaluation Matrix (Evidence-Based v2.1)</h3>
+                <p class="panel-card-desc">Calibrated 0–100 weighting thresholds eliminating false positives on legitimate web apps</p>
+              </div>
+            </div>
+            <div class="toggle-btn-wrap">
+              <span id="severityToggle" class="severity-toggle-icon">+</span>
+            </div>
+          </div>
+
+          <div id="severityContent" style="display: none;">
+            <div class="table-responsive" data-lenis-prevent>
+              <table class="severity-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Safe Baseline</th>
+                    <th>Threat Condition</th>
+                    <th>SOC Impact Assessment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr id="param-scripts">
+                    <td>
+                      <div class="param-cell-title">Script Tags</div>
+                      <span class="param-tag">&lt;script&gt;</span>
+                    </td>
+                    <td><span class="range-pill safe">Standard App Volume</span></td>
+                    <td><span class="range-pill info">Obfuscation / Keylogger</span></td>
+                    <td>Script volume incurs 0 pts; only eval/encoded payloads or keyloggers score</td>
+                  </tr>
+                  <tr id="param-hidden">
+                    <td>
+                      <div class="param-cell-title">Hidden Elements</div>
+                      <span class="param-tag">Modals, Nav, SVGs</span>
+                    </td>
+                    <td><span class="range-pill safe">Responsive UI Elements</span></td>
+                    <td><span class="range-pill danger">Concealed password / form</span></td>
+                    <td>Stealth autofill credential harvesting or silent clickjacking attempts</td>
+                  </tr>
+                  <tr id="param-iframes">
+                    <td>
+                      <div class="param-cell-title">Iframes</div>
+                      <span class="param-tag">&lt;iframe&gt;</span>
+                    </td>
+                    <td><span class="range-pill safe">Legitimate Embedded Frames</span></td>
+                    <td><span class="range-pill danger">0x0 or obscured external iframe</span></td>
+                    <td>Background drive-by payload delivery or unauthorized cross-origin framing</td>
+                  </tr>
+                  <tr id="param-keywords">
+                    <td>
+                      <div class="param-cell-title">Authentication Lures</div>
+                      <span class="param-tag">login, verify, wallet...</span>
+                    </td>
+                    <td><span class="range-pill safe">Authentic Login Portals</span></td>
+                    <td><span class="range-pill danger">Cross-domain / Raw IP POST</span></td>
+                    <td>Social engineering lures paired with external credential exfiltration</td>
+                  </tr>
+                  <tr id="param-vt">
+                    <td>
+                      <div class="param-cell-title">VirusTotal Flags</div>
+                      <span class="param-tag">Global Reputation</span>
+                    </td>
+                    <td><span class="range-pill safe">0 Detections (Indexed)</span></td>
+                    <td><span class="range-pill danger">&ge; 1 Malicious Detection</span></td>
+                    <td>Confirmed blacklisting across global threat intelligence antivirus engines</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p class="severity-note">
+              <i data-lucide="info" class="icon-14"></i>
+              <span>Severity is derived strictly from verified security evidence on a 0–100 scale. Benign modern architectures (e.g. GitHub, Google) incur 0 penalty points.</span>
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SECTION 2: NEW SCAN ================= -->
+      <section id="view-scanner" class="view-section">
+        <!-- Scanner Console Card -->
+        <div class="panel-card scanner-panel">
+          <div class="panel-card-header">
+            <div>
+              <h2 class="panel-card-title">Target Threat Scanner</h2>
+              <p class="panel-card-desc">Execute deep static DOM inspection and VirusTotal v3 reputation analysis</p>
+            </div>
+            <!-- Mode Switcher Tabs -->
+            <div class="scan-mode-tabs">
+              <button
+                type="button"
+                id="modeUrlBtn"
+                class="mode-tab active"
+                onclick="setScanMode('url')"
+              >
+                <i data-lucide="globe" class="icon-15"></i>
+                <span>Website URL</span>
+              </button>
+              <button
+                type="button"
+                id="modeHtmlBtn"
+                class="mode-tab"
+                onclick="setScanMode('html')"
+              >
+                <i data-lucide="code-2" class="icon-15"></i>
+                <span>HTML Source Code</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-card-body">
+            <!-- Instructions Banner -->
+            <div id="scannerInstructions" class="scanner-instruction-banner">
+              <div class="banner-icon">
+                <i data-lucide="terminal" class="icon-16"></i>
+              </div>
+              <div class="banner-text" id="instructionsText">
+                Enter a fully qualified URL (starting with <code>http://</code> or <code>https://</code>). The system will fetch and analyze DOM structure, embedded scripts, and check VirusTotal threat database.
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div class="input-wrapper">
+                <textarea
+                  id="inputData"
+                  class="code-textarea"
+                  data-lenis-prevent
+                  placeholder="Enter target website URL (e.g. https://github.com) or paste raw HTML source code..."
+                  rows="3"
+                ></textarea>
+              </div>
+
+              <!-- Quick Presets Toolbar -->
+              <div class="scanner-toolbar">
+                <span class="toolbar-label">TEST FIXTURES:</span>
+                <button type="button" class="toolbar-btn" onclick="loadPreset('github')">GitHub.com (Clean)</button>
+                <button type="button" class="toolbar-btn" onclick="loadPreset('google')">Google.com (Clean)</button>
+                <button type="button" class="toolbar-btn" onclick="loadPreset('hidden_pass')">Hidden Credential Harvester</button>
+                <button type="button" class="toolbar-btn" onclick="loadPreset('phishing')">Phishing Form + Raw IP</button>
+                <button type="button" class="toolbar-btn" onclick="loadPreset('eval')">Obfuscated eval(atob())</button>
+                <button type="button" class="toolbar-btn" onclick="loadPreset('iframe')">Hidden External Iframe</button>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="scanner-actions">
+                <button id="scanBtn" class="btn btn-primary btn-scan" onclick="scan()">
+                  <i data-lucide="scan-line" class="icon-16 scan-icon"></i>
+                  <span>Scan Website</span>
+                </button>
+                <button id="clearBtn" class="btn btn-secondary" onclick="clearForm()">
+                  <i data-lucide="trash-2" class="icon-15"></i>
+                  <span>Clear</span>
+                </button>
+              </div>
+
+              <!-- Advanced GSAP Tactical Scanning Animation -->
+              <div id="loading" class="loading-state" style="display:none;">
+                <div class="scan-laser-line" aria-hidden="true"></div>
+                <div class="radar-spinner">
+                  <div class="radar-sweep"></div>
+                  <div class="radar-ring-outer"></div>
+                  <div class="radar-dot"></div>
+                </div>
+                <div class="loading-text-wrap">
+                  <div class="loading-main-row">
+                    <span class="loading-main-text">Scanning Target Infrastructure</span>
+                    <span class="loading-live-badge">LIVE TELEMETRY</span>
+                  </div>
+                  <div class="loading-sub-text" id="loadingStage">Executing heuristic inspection and querying reputation feeds...</div>
+                  <div class="scan-stages-pills">
+                    <span class="stage-pill active" id="stageDom"><i data-lucide="file-code" class="icon-12"></i> DOM Parser</span>
+                    <span class="stage-pill" id="stageJs"><i data-lucide="cpu" class="icon-12"></i> Script Heuristics</span>
+                    <span class="stage-pill" id="stageVt"><i data-lucide="shield" class="icon-12"></i> VirusTotal v3</span>
+                    <span class="stage-pill" id="stageRisk"><i data-lucide="gauge" class="icon-12"></i> Evidence Score</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= SCAN RESULTS INTERFACE ================= -->
+        <div id="result" class="result panel-card result-panel" style="display:none;">
+          <!-- Report Top Header & Actions -->
+          <div class="panel-card-header result-header">
+            <div class="result-header-left">
+              <div class="result-header-badge">
+                <span class="pulse-dot-sm"></span>
+                <span>THREAT INTELLIGENCE REPORT</span>
+              </div>
+              <h3 class="panel-card-title">Security Assessment Report</h3>
+              <div class="result-target-label">
+                <span class="target-type-tag" id="resultTargetType">TARGET</span>
+                <span class="target-val" id="resultTargetValue">https://example.com</span>
+                <button type="button" id="copyTargetBtn" class="btn-inline-copy" onclick="copyTargetUrl()" title="Copy target">
+                  <i data-lucide="copy" class="icon-12"></i>
+                  <span>Copy Target</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="result-header-right">
+              <div class="timestamp-box">
+                <span class="ts-label">SCAN TIMESTAMP</span>
+                <span id="scanTime" class="ts-val">--</span>
+              </div>
+              <div class="report-actions-bar">
+                <button type="button" id="rescanBtn" class="btn btn-sm btn-secondary" onclick="rescanCurrentTarget()">
+                  <i data-lucide="rotate-cw" class="icon-14"></i>
+                  <span>Rescan Target</span>
+                </button>
+                <button type="button" id="downloadBtn" class="btn btn-sm btn-outline download-btn" onclick="downloadReport()" style="display:none;">
+                  <i data-lucide="file-text" class="icon-14"></i>
+                  <span>Download TXT</span>
+                </button>
+                <button type="button" id="downloadPdfBtn" class="btn btn-sm btn-outline" onclick="exportPdfReport()">
+                  <i data-lucide="printer" class="icon-14"></i>
+                  <span>Export PDF</span>
+                </button>
+                <button type="button" id="backDashboardBtn" class="btn btn-sm btn-secondary" onclick="switchView('dashboard')">
+                  <i data-lucide="arrow-left" class="icon-14"></i>
+                  <span>Dashboard</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-card-body">
+            <!-- 1 & 2. EXECUTIVE SECURITY VERDICT HERO + CIRCULAR RISK SCORE -->
+            <div class="verdict-hero-grid">
+              <!-- Executive Verdict Card -->
+              <div class="verdict-hero verdict-safe" id="verdictKpiCard">
+                <div class="verdict-hero-top">
+                  <div class="verdict-status-wrap">
+                    <span id="severityIcon" class="severity-icon-badge" aria-hidden="true">✅</span>
+                    <div>
+                      <div class="kpi-label">EXECUTIVE SECURITY VERDICT</div>
+                      <div class="verdict-title-row">
+                        <span id="securityVerdict" class="verdict-text safe">SAFE</span>
+                        <span id="verdictPolicyBadge" class="verdict-policy-pill safe">VERIFIED BASELINE</span>
+                      </div>
+                    </div>
+                  </div>
+                  <span id="scanCoverageBadge" class="coverage-pill full">Full Inspection</span>
+                </div>
+
+                <p class="verdict-hero-desc" id="verdictDesc">
+                  Clean security posture. No significant threats detected.
+                </p>
+
+                <div class="verdict-meta-grid">
+                  <div class="verdict-meta-item">
+                    <span class="meta-k">TARGET INPUT</span>
+                    <span class="meta-v mono" id="heroTargetMeta">--</span>
+                  </div>
+                  <div class="verdict-meta-item">
+                    <span class="meta-k">RISK SCORE</span>
+                    <span class="meta-v mono" id="heroScoreMeta">0 / 100</span>
+                  </div>
+                  <div class="verdict-meta-item">
+                    <span class="meta-k">SEVERITY LEVEL</span>
+                    <span class="meta-v mono" id="heroSeverityMeta">LOW</span>
+                  </div>
+                  <div class="verdict-meta-item">
+                    <span class="meta-k">SCAN COVERAGE</span>
+                    <span class="meta-v" id="coverageNote">DOM structure and heuristics verified</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Circular Risk Score & Severity Visualization -->
+              <div class="kpi-card risk-gauge-card" id="riskGaugeCard">
+                <div class="kpi-label-row">
+                  <span class="kpi-label">COMPOSITE RISK SCORE</span>
+                  <span id="severity" class="status-badge low">LOW</span>
+                </div>
+
+                <div class="risk-gauge-body">
+                  <div class="risk-gauge-svg-wrap">
+                    <svg class="risk-gauge-svg" viewBox="0 0 132 132" aria-label="Risk score radial indicator">
+                      <circle class="risk-gauge-track" cx="66" cy="66" r="54" />
+                      <circle id="riskGaugeArc" class="risk-gauge-arc low" cx="66" cy="66" r="54" stroke-dasharray="339.292" stroke-dashoffset="339.292" />
+                    </svg>
+                    <div class="risk-gauge-center">
+                      <span id="riskScore" class="risk-score-value">0</span>
+                      <span class="risk-score-denom">/ 100</span>
+                    </div>
+                  </div>
+
+                  <div class="risk-gauge-details">
+                    <div class="counts-subrow">
+                      <span class="count-tag threats"><strong id="metricThreatCount">0</strong> Threats</span>
+                      <span class="count-tag info"><strong id="metricInfoCount">0</strong> Info</span>
+                    </div>
+                    <div class="risk-bar-container">
+                      <div id="riskScoreProgressBar" class="risk-bar-fill safe" style="width: 0%;"></div>
+                    </div>
+                    <div class="risk-bar-scale">
+                      <span>0 LOW</span>
+                      <span>30 MED</span>
+                      <span>70+ HIGH</span>
+                    </div>
+                    <p class="risk-factors-note" id="riskFactorsSummary">
+                      Derived strictly from verified static heuristics and threat intelligence score contributions.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Risk Explanation Card -->
+            <div class="panel-section risk-explanation-section">
+              <h4 class="section-heading">
+                <i data-lucide="alert-circle" class="icon-16"></i>
+                <span>Verdict Rationale &amp; Risk Factors</span>
+              </h4>
+              <ul id="riskExplanation" class="risk-explanation-list">
+                <!-- Rendered dynamically -->
+              </ul>
+            </div>
+
+            <!-- 4. VIRUSTOTAL THREAT INTELLIGENCE PANEL -->
+            <div class="panel-section vt-intel-section" id="vtIntelSection">
+              <div class="findings-section-header">
+                <h4 class="section-heading">
+                  <i data-lucide="shield-alert" class="icon-16"></i>
+                  <span>VirusTotal Threat Intelligence</span>
+                </h4>
+                <span id="vtEngineStatusBadge" class="vt-status-pill unavailable">UNAVAILABLE</span>
+              </div>
+
+              <div class="vt-intel-card">
+                <div class="vt-status-banner" id="vtStatusBanner">
+                  <div class="vt-status-main" id="vtStatusNote">Reputation check completed</div>
+                  <div class="vt-analysis-ts">
+                    <span>Analysis Timestamp:</span>
+                    <strong id="vtAnalysisTimestamp" class="mono">N/A</strong>
+                  </div>
+                </div>
+
+                <div class="vt-metrics-grid">
+                  <div class="vt-metric-box danger">
+                    <span class="vt-metric-label">MALICIOUS</span>
+                    <span class="vt-metric-value text-danger" id="vtMalicious">0</span>
+                    <span class="vt-metric-sub">Vendor flags</span>
+                  </div>
+                  <div class="vt-metric-box warning">
+                    <span class="vt-metric-label">SUSPICIOUS</span>
+                    <span class="vt-metric-value text-warning" id="vtSuspicious">0</span>
+                    <span class="vt-metric-sub">Vendor flags</span>
+                  </div>
+                  <div class="vt-metric-box safe">
+                    <span class="vt-metric-label">HARMLESS</span>
+                    <span class="vt-metric-value text-safe" id="vtHarmless">N/A</span>
+                    <span class="vt-metric-sub">Clean engines</span>
+                  </div>
+                  <div class="vt-metric-box neutral">
+                    <span class="vt-metric-label">UNDETECTED</span>
+                    <span class="vt-metric-value" id="vtUndetected">N/A</span>
+                    <span class="vt-metric-sub">No signature</span>
+                  </div>
+                  <div class="vt-metric-box primary">
+                    <span class="vt-metric-label">TOTAL ENGINES</span>
+                    <span class="vt-metric-value text-primary" id="vtTotalEngines">N/A</span>
+                    <span class="vt-metric-sub">Engines analyzed</span>
+                  </div>
+                  <div class="vt-metric-box neutral">
+                    <span class="vt-metric-label">REPUTATION</span>
+                    <span class="vt-metric-value" id="vtReputation">N/A</span>
+                    <span class="vt-metric-sub">Community score</span>
+                  </div>
+                </div>
+
+                <div id="vtConsensusWrap" class="vt-consensus-wrap" style="display:none;">
+                  <div class="vt-consensus-header">
+                    <span>Engine Consensus Distribution</span>
+                    <span id="vtConsensusSummary" class="mono">--</span>
+                  </div>
+                  <div id="vtConsensusBar" class="vt-consensus-bar"></div>
+                </div>
+
+                <div id="vtSafetyDisclaimer" class="vt-disclaimer-note">
+                  <i data-lucide="info" class="icon-14"></i>
+                  <span id="vtDisclaimerText">Reputation intelligence provides vendor blacklist context. Zero VirusTotal detections does not independently guarantee safety for newly deployed or targeted phishing pages.</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 6. RECOMMENDED REMEDIATION & ACTIONS -->
+            <div class="panel-section remediation-section">
+              <div class="findings-section-header">
+                <h4 class="section-heading">
+                  <i data-lucide="shield-check" class="icon-16"></i>
+                  <span>Recommended Actions &amp; Triage Playbook</span>
+                </h4>
+                <span id="remediationPriorityTag" class="panel-tag mono-tag">BASELINE</span>
+              </div>
+              <div id="remediationBanner" class="remediation-callout safe">
+                <div class="remediation-summary" id="remediationSummary">
+                  No immediate threat containment required. Target conforms to standard web security baselines.
+                </div>
+                <ul id="remediationChecklist" class="remediation-checklist">
+                  <!-- Populated dynamically from actual findings -->
+                </ul>
+              </div>
+            </div>
+
+            <!-- 3. CATEGORIZED DETECTION EVIDENCE -->
+            <div class="panel-section evidence-findings-section">
+              <div class="findings-section-header">
+                <h4 class="section-heading">
+                  <i data-lucide="file-search" class="icon-16"></i>
+                  <span>Detection Evidence &amp; Forensic Signals</span>
+                </h4>
+                <div class="findings-filter-chips">
+                  <span class="finding-chip-count threats" id="threatCountBadge">0 Threats</span>
+                  <span class="finding-chip-count info" id="infoCountBadge">0 Informational</span>
+                </div>
+              </div>
+
+              <!-- Category Filter Bar (populated from actual analyzer findings) -->
+              <div id="evidenceCategoryTabs" class="evidence-category-tabs"></div>
+
+              <!-- Categorized Evidence Table -->
+              <div class="table-responsive evidence-table-wrap" data-lenis-prevent>
+                <table class="data-table evidence-data-table">
+                  <thead>
+                    <tr>
+                      <th>Detection Name</th>
+                      <th>Category</th>
+                      <th>Description</th>
+                      <th>Severity</th>
+                      <th>Source</th>
+                      <th class="text-right">Score</th>
+                    </tr>
+                  </thead>
+                  <tbody id="evidenceTableBody">
+                    <!-- Populated by script.js -->
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Detailed Forensic Cards -->
+              <div id="findingsContainer" class="findings-cards-list">
+                <!-- Injected by script.js -->
+              </div>
+            </div>
+
+            <!-- Evidence-Based Risk Score Contribution Breakdown Table -->
+            <div class="panel-section score-breakdown-section">
+              <div class="findings-section-header">
+                <h4 class="section-heading">
+                  <i data-lucide="bar-chart-3" class="icon-16"></i>
+                  <span>Score Contribution Breakdown (Sum = Final Score)</span>
+                </h4>
+                <span class="total-score-pill" id="scoreMathSummary">Total Score: 0 / 100</span>
+              </div>
+              <div class="table-responsive" data-lenis-prevent>
+                <table class="data-table score-breakdown-table">
+                  <thead>
+                    <tr>
+                      <th>Finding Identifier</th>
+                      <th>Description</th>
+                      <th>Severity</th>
+                      <th>Source</th>
+                      <th>Observed Evidence</th>
+                      <th class="text-right">Contribution</th>
+                    </tr>
+                  </thead>
+                  <tbody id="scoreBreakdownTableBody">
+                    <!-- Populated by JavaScript -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- 5. STATIC DOM ANALYSIS MATRIX -->
+            <div class="panel-section static-analysis-section">
+              <div class="findings-section-header">
+                <h4 class="section-heading">
+                  <i data-lucide="cpu" class="icon-16"></i>
+                  <span>Static DOM &amp; Heuristic Inspection</span>
+                </h4>
+                <span class="panel-tag mono-tag" id="domPayloadSizeBadge">Payload: N/A</span>
+              </div>
+
+              <div class="analysis-tiles-grid dom-metrics-grid">
+                <div class="analysis-tile">
+                  <div class="tile-header">
+                    <span class="tile-title">Scripts Detected</span>
+                    <span class="tile-badge">&lt;script&gt;</span>
+                  </div>
+                  <div class="tile-val" id="scripts">0</div>
+                  <div class="tile-hint">Actual static script count</div>
+                </div>
+
+                <div class="analysis-tile">
+                  <div class="tile-header">
+                    <span class="tile-title">External Resources</span>
+                    <span class="tile-badge">EXT SRC</span>
+                  </div>
+                  <div class="tile-val" id="domExternalResources">N/A</div>
+                  <div class="tile-hint" id="domExternalResourcesHint">Not separately reported by engine</div>
+                </div>
+
+                <div class="analysis-tile">
+                  <div class="tile-header">
+                    <span class="tile-title">Forms Count</span>
+                    <span class="tile-badge">&lt;form&gt;</span>
+                  </div>
+                  <div class="tile-val" id="domFormsCount">N/A</div>
+                  <div class="tile-hint" id="domFormsHint">Not separately reported by engine</div>
+                </div>
+
+                <div class="analysis-tile">
+                  <div class="tile-header">
+                    <span class="tile-title">Hidden Elements</span>
+                    <span class="tile-badge">VISIBILITY</span>
+                  </div>
+                  <div class="tile-val" id="hidden">No</div>
+                  <div class="tile-hint" id="domHiddenCountHint">Concealed DOM inspection</div>
+                </div>
+
+                <div class="analysis-tile">
+                  <div class="tile-header">
+                    <span class="tile-title">Iframes</span>
+                    <span class="tile-badge">&lt;iframe&gt;</span>
+                  </div>
+                  <div class="tile-val" id="iframes">0</div>
+                  <div class="tile-hint" id="domIframeHint">Evaluated for hidden/data src</div>
+                </div>
+
+                <div class="analysis-tile">
+                  <div class="tile-header">
+                    <span class="tile-title">Password Fields</span>
+                    <span class="tile-badge">AUTH</span>
+                  </div>
+                  <div class="tile-val" id="domPasswordFields">N/A</div>
+                  <div class="tile-hint" id="domPasswordHint">Not separately reported by engine</div>
+                </div>
+
+                <div class="analysis-tile">
+                  <div class="tile-header">
+                    <span class="tile-title">Suspicious Event Handlers</span>
+                    <span class="tile-badge">EVENTS</span>
+                  </div>
+                  <div class="tile-val" id="domEventHandlers">N/A</div>
+                  <div class="tile-hint" id="domEventHandlersHint">Not separately reported by engine</div>
+                </div>
+
+                <div class="analysis-tile">
+                  <div class="tile-header">
+                    <span class="tile-title">DOM Payload Size</span>
+                    <span class="tile-badge">BYTES</span>
+                  </div>
+                  <div class="tile-val" id="domPayloadSize">N/A</div>
+                  <div class="tile-hint">Captured HTML length</div>
+                </div>
+              </div>
+
+              <div class="analysis-details-row">
+                <div class="detail-box">
+                  <div class="detail-box-header">
+                    <span class="detail-title">Suspicious JavaScript Patterns</span>
+                    <span class="detail-sub">eval(atob), keylogger, dynamic injection, packed hex</span>
+                  </div>
+                  <div id="jsPatterns" class="detail-content code-tokens">None</div>
+                </div>
+
+                <div class="detail-box">
+                  <div class="detail-box-header">
+                    <span class="detail-title">Observed Authentication Keywords</span>
+                    <span class="detail-sub">login, account, verify (informational unless cross-posted)</span>
+                  </div>
+                  <div id="keywords" class="detail-content keyword-tokens">None</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SECTION 3: SCAN HISTORY ================= -->
+      <section id="view-history" class="view-section">
+        <div class="panel-card history-panel">
+          <div class="panel-card-header">
+            <div>
+              <h2 class="panel-card-title">Detection Audit Log</h2>
+              <p class="panel-card-desc">Inspect and triage all previously executed threat scans</p>
+            </div>
+            <div class="history-actions">
+              <button class="btn btn-sm btn-secondary" onclick="clearScanHistory()">
+                <i data-lucide="trash-2" class="icon-14"></i>
+                <span>Clear History</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-card-body p-0">
+            <!-- Search & Filter bar -->
+            <div class="history-filter-bar">
+              <div class="history-search-wrap">
+                <i data-lucide="search" class="icon-15"></i>
+                <input
+                  type="text"
+                  id="historySearchInput"
+                  placeholder="Filter history by target, verdict, or severity..."
+                  oninput="filterHistoryTable()"
+                />
+              </div>
+              <div class="history-filter-pills">
+                <button class="filter-pill active" data-filter="ALL" onclick="setHistoryFilter('ALL')">All</button>
+                <button class="filter-pill" data-filter="SAFE" onclick="setHistoryFilter('SAFE')">Safe</button>
+                <button class="filter-pill" data-filter="SUSPICIOUS" onclick="setHistoryFilter('SUSPICIOUS')">Suspicious</button>
+                <button class="filter-pill" data-filter="MALICIOUS" onclick="setHistoryFilter('MALICIOUS')">Malicious</button>
+                <button class="filter-pill" data-filter="INCONCLUSIVE" onclick="setHistoryFilter('INCONCLUSIVE')">Inconclusive</button>
+              </div>
+            </div>
+
+            <!-- Full History Table -->
+            <div class="table-responsive" data-lenis-prevent>
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Website / Target</th>
+                    <th>Scan Date</th>
+                    <th>Severity</th>
+                    <th>Security Verdict</th>
+                    <th class="text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                  <!-- Populated by JavaScript -->
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Legacy container preservation for compatibility -->
+            <div class="history" style="display:none;">
+              <h3>Scan History</h3>
+              <ul id="historyList"></ul>
+            </div>
+
+            <!-- Empty State for History -->
+            <div id="fullHistoryEmpty" class="table-empty-state">
+              <div class="empty-icon-wrap">
+                <i data-lucide="clock" class="icon-28"></i>
+              </div>
+              <h4>No Scan History Recorded</h4>
+              <p>Your audit log is empty. Inspections executed during this browser session will appear here.</p>
+              <button class="btn btn-sm btn-primary" onclick="switchView('scanner')">Run New Scan</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SECTION 4: REPORTS ================= -->
+      <section id="view-reports" class="view-section">
+        <div class="panel-card empty-feature-panel">
+          <div class="feature-badge">Phase 2 Roadmap</div>
+          <div class="empty-feature-icon">
+            <i data-lucide="file-bar-chart-2" class="icon-36"></i>
+          </div>
+          <h2 class="empty-feature-title">Automated Security &amp; Threat Reports</h2>
+          <p class="empty-feature-desc">
+            The automated reporting suite is scheduled for Phase 2. This module will deliver recurring threat audits, executive PDF summaries, and real-time SIEM webhook notifications.
+          </p>
+
+          <div class="planned-features-grid">
+            <div class="planned-card">
+              <div class="planned-icon"><i data-lucide="file-text" class="icon-20"></i></div>
+              <h4>Executive PDF Briefs</h4>
+              <p>Download comprehensive, branded cybersecurity threat evaluation PDFs for compliance reporting.</p>
+            </div>
+            <div class="planned-card">
+              <div class="planned-icon"><i data-lucide="timer" class="icon-20"></i></div>
+              <h4>Scheduled Monitoring</h4>
+              <p>Configure automated hourly or daily recurrent URL health and reputation checks.</p>
+            </div>
+            <div class="planned-card">
+              <div class="planned-icon"><i data-lucide="webhook" class="icon-20"></i></div>
+              <h4>Webhook &amp; SIEM Feeds</h4>
+              <p>Forward detected high-risk threats directly to Slack, Microsoft Teams, or enterprise SIEM.</p>
+            </div>
+          </div>
+
+          <div class="empty-feature-footer">
+            <span class="note-pill">Available Now</span>
+            <span>Download single-scan audit reports directly from the <strong>New Scan</strong> results view after executing an inspection.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SECTION 5: SETTINGS ================= -->
+      <section id="view-settings" class="view-section">
+        <div class="panel-card empty-feature-panel">
+          <div class="feature-badge">Phase 2 Roadmap</div>
+          <div class="empty-feature-icon">
+            <i data-lucide="sliders" class="icon-36"></i>
+          </div>
+          <h2 class="empty-feature-title">Engine Configuration &amp; Policy Settings</h2>
+          <p class="empty-feature-desc">
+            Custom sensitivity tuning and policy rules will be introduced in Phase 2. The detection engine is currently operating with calibrated enterprise baseline thresholds.
+          </p>
+
+          <div class="current-config-summary">
+            <h4 class="config-summary-title">Active Baseline Parameters (Read-Only)</h4>
+            <div class="config-grid">
+              <div class="config-item">
+                <span class="config-key">Backend API Host</span>
+                <span class="config-val">http://localhost:3000</span>
+              </div>
+              <div class="config-item">
+                <span class="config-key">Static Engine</span>
+                <span class="config-val">Cheerio Heuristic Inspector v2.1</span>
+              </div>
+              <div class="config-item">
+                <span class="config-key">VirusTotal Integration</span>
+                <span class="config-val">Enabled (v3 Categorized Reputation)</span>
+              </div>
+              <div class="config-item">
+                <span class="config-key">Verdict Engine</span>
+                <span class="config-val">SAFE | SUSPICIOUS | MALICIOUS | INCONCLUSIVE</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
   </div>
-
-</div>
-
-  <!-- Scan Result -->
-  <div id="result" class="result" style="display:none;">
-    <h3>Scan Result</h3>
-    <p><strong>Scan Time:</strong> <span id="scanTime"></span></p>
-
-    <p>
-      <strong>Severity:</strong>
-      <span id="severityIcon"></span>
-      <span id="severity"></span>
-    </p>
-
-    <h4>Risk Explanation</h4>
-    <ul id="riskExplanation"></ul>
-
-    <p><strong>Risk Score:</strong> <span id="riskScore"></span></p>
-
-    <h4>Static Analysis</h4>
-    <ul>
-      <li>Scripts: <span id="scripts"></span></li>
-      <li>Iframes: <span id="iframes"></span></li>
-      <li>Hidden Elements: <span id="hidden"></span></li>
-      <li>Suspicious JS: <span id="jsPatterns"></span></li>
-      <li>Keywords Found: <span id="keywords"></span></li>
-    </ul>
-
-    <h4>VirusTotal</h4>
-    <p>Malicious: <span id="vtMalicious"></span></p>
-    <p>Suspicious: <span id="vtSuspicious"></span></p>
-  </div>
-
-  <!-- Download -->
-  <button id="downloadBtn" onclick="downloadReport()" style="display:none;">
-    Download Report
-  </button>
-
-  <!-- Severity Parameters -->
- <div class="severity-guide">
-
-  <div class="severity-header" onclick="toggleSeverityGuide()">
-    <h3>🔍 Severity Evaluation Parameters</h3>
-    <span id="severityToggle">➕</span>
-  </div>
-
-  <div id="severityContent" style="display: none;">
-    <table class="severity-table">
-      <thead>
-        <tr>
-          <th>Parameter</th>
-          <th>Safe Range</th>
-          <th>Risk Condition</th>
-          <th>Impact</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr id="param-scripts">
-          <td>Script Tags</td>
-          <td>0 – 3</td>
-          <td>&gt; 5 scripts</td>
-          <td>Increased attack surface</td>
-        </tr>
-        <tr id="param-hidden">
-          <td>Hidden Elements</td>
-          <td>None</td>
-          <td>Hidden iframe / div</td>
-          <td>Possible cloaking</td>
-        </tr>
-        <tr id="param-iframes">
-          <td>Iframes</td>
-          <td>None</td>
-          <td>External or hidden iframe</td>
-          <td>Background redirection</td>
-        </tr>
-        <tr id="param-keywords">
-          <td>Suspicious Keywords</td>
-          <td>None</td>
-          <td>login, verify, wallet</td>
-          <td>Phishing indicator</td>
-        </tr>
-        <tr id="param-vt">
-          <td>VirusTotal Flags</td>
-          <td>0 detections</td>
-          <td>≥ 1 malicious report</td>
-          <td>Known malicious source</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <p class="severity-note">
-      ℹ️ Severity is calculated using static HTML inspection and reputation checks only.
-    </p>
-  </div>
-
-</div>
-
-
-  <!-- Scan History -->
-  <div class="history">
-    <h3>Scan History</h3>
-    <ul id="historyList"></ul>
-  </div>
-
 </div>
 
 <script src="script.js"></script>
