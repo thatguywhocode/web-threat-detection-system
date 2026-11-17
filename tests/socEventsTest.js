@@ -74,9 +74,14 @@ function invokeApp(expressApp, method, url, { body, headers = {} } = {}) {
     res.getHeader = (k) => responseHeaders[k.toLowerCase()];
     res.writeHead = (code, hdrs) => {
       statusCode = code;
+      res.statusCode = code;
       if (hdrs) Object.assign(responseHeaders, hdrs);
     };
-    res.status = (c) => { statusCode = c; return res; };
+    res.status = (c) => {
+      statusCode = c;
+      res.statusCode = c;
+      return res;
+    };
     res.json = (data) => {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify(data));
@@ -84,6 +89,11 @@ function invokeApp(expressApp, method, url, { body, headers = {} } = {}) {
     res.send = (data) => {
       if (typeof data === "object") return res.json(data);
       res.end(String(data));
+    };
+    res.sendFile = (filepath) => {
+      const fs = require("fs");
+      res.setHeader("content-type", "text/html");
+      res.end(fs.readFileSync(filepath, "utf8"));
     };
     res.write = (chunk) => {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -382,6 +392,58 @@ async function runTests() {
     const socRes = await invokeApp(app, "GET", "/api/soc/events?sort=newest&limit=1");
     assert(socRes.data.events.length > 0);
     assert.strictEqual(socRes.data.events[0].verdict, "SAFE");
+  });
+
+  /* ================= 8. RENDER DEPLOYMENT & SSRF SECURITY TESTS ================= */
+  console.log("\n--- 8. Render Deployment & Security Hardening Tests ---");
+
+  await testAsync("GET / with text/html accepts header serves dashboard index.html", async () => {
+    const res = await invokeApp(app, "GET", "/", {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0"
+      }
+    });
+    assert.strictEqual(res.status, 200);
+    assert(typeof res.data === "string" && res.data.includes("<title>Secunexis"), "Must serve dashboard HTML with Secunexis title");
+  });
+
+  await testAsync("GET /health responds with 200 OK for Render health monitoring", async () => {
+    const res = await invokeApp(app, "GET", "/health");
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.data, "OK");
+  });
+
+  await testAsync("GET /api/health responds with 200 JSON status for API monitoring", async () => {
+    const res = await invokeApp(app, "GET", "/api/health");
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.data.status, "ok");
+  });
+
+  await testAsync("SSRF Protection blocks loopback and private IP scan targets", async () => {
+    const targets = [
+      "http://127.0.0.1:8080",
+      "http://localhost:3000",
+      "http://169.254.169.254/latest/meta-data",
+      "http://10.0.0.1/admin",
+      "http://192.168.1.1/router",
+      "http://metadata.google.internal"
+    ];
+
+    for (const url of targets) {
+      const res = await invokeApp(app, "POST", "/scan", {
+        body: { url }
+      });
+      assert.strictEqual(res.status, 400, `Target ${url} must be rejected with 400`);
+      assert(res.data.error.includes("SSRF protection"), `Error message must cite SSRF protection for ${url}`);
+    }
+  });
+
+  await testAsync("API endpoints return standard rate limiting headers", async () => {
+    const res = await invokeApp(app, "GET", "/api/soc/events?limit=1");
+    assert.strictEqual(res.status, 200);
+    assert(res.headers["x-ratelimit-limit"], "Must include X-RateLimit-Limit header");
+    assert(res.headers["x-ratelimit-remaining"] !== undefined, "Must include X-RateLimit-Remaining header");
   });
 
   console.log("\n==========================================================================================");

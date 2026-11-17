@@ -3,3 +3,6 @@
 .env.development
 .env.production
 node_modules/
+.DS_Store
+.render
+npm-debug.log*

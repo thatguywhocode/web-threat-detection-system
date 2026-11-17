@@ -5,8 +5,16 @@
  * for normalized SOC SecurityEvent records.
  */
 
-const { getSecurityEventModel } = require("./eventModel");
+const { getSecurityEventModel, isMongoConnected, initDb } = require("./eventModel");
 const { adaptScanResult } = require("./eventAdapter");
+
+async function ensureDb() {
+  if (typeof isMongoConnected === "function" && !isMongoConnected() && process.env.MONGODB_URI) {
+    try {
+      await initDb();
+    } catch (_) {}
+  }
+}
 
 /**
  * Escapes regex special characters to prevent ReDoS or regex injection attacks
@@ -88,6 +96,7 @@ function parseAndSanitizeFilters(query = {}) {
  * @returns {Promise<{ event: Object, isDuplicate: boolean }>}
  */
 async function recordScanEvent(scanInput, scanResult, options = {}) {
+  await ensureDb();
   const model = getSecurityEventModel();
   const eventDoc = adaptScanResult(scanInput, scanResult, options);
 
@@ -128,6 +137,7 @@ async function recordScanEvent(scanInput, scanResult, options = {}) {
  * @returns {Promise<Object>} Paginated events result
  */
 async function getEvents(query = {}) {
+  await ensureDb();
   const model = getSecurityEventModel();
   const filter = parseAndSanitizeFilters(query);
 
@@ -172,6 +182,7 @@ async function getEvents(query = {}) {
  * Retrieves a single event by eventId or Mongo _id
  */
 async function getEventById(id) {
+  await ensureDb();
   const model = getSecurityEventModel();
   if (!id || typeof id !== "string") return null;
 
@@ -186,6 +197,7 @@ async function getEventById(id) {
  * Computes high-level aggregated SOC telemetry statistics
  */
 async function getEventStats() {
+  await ensureDb();
   const model = getSecurityEventModel();
   const [total, safe, suspicious, malicious, inconclusive] = await Promise.all([
     model.countDocuments({}),

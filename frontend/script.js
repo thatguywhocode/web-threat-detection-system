@@ -1,7 +1,14 @@
 /**
- * SentinelCore — Web Threat Detection System
+ * SecuNexis — Web Threat Detection & Security Analysis Platform
  * Enterprise SOC Frontend Controller, Analytics & Animation Engine (v2.1)
  */
+
+// ================= ENVIRONMENT-ADAPTIVE API CONFIGURATION =================
+// - When running on Render or any standard web server (HTTP/HTTPS): uses same-origin relative paths ("")
+// - When opened as a local standalone file (file://): defaults to "http://localhost:3000"
+const API_BASE = (typeof window !== "undefined" && (window.location.protocol === "http:" || window.location.protocol === "https:"))
+  ? ""
+  : "http://localhost:3000";
 
 // Global Chart & Library Instances
 let threatChartInstance = null;
@@ -116,6 +123,12 @@ window.onload = () => {
   // Initialize Enterprise SOC Timeline Stream & Controls
   initSocTimelineControls();
   fetchSocTimelineEvents();
+
+  // Dynamic API Host display in Settings view
+  const configHostEl = document.getElementById("configApiHost");
+  if (configHostEl) {
+    configHostEl.textContent = API_BASE ? `${API_BASE} (Standalone)` : `${window.location.origin || "Same-Origin"} (/api)`;
+  }
 
   // Hide download button initially
   const downloadBtn = document.getElementById("downloadBtn");
@@ -619,7 +632,7 @@ async function scan() {
   if (resultDiv) resultDiv.style.display = "none";
 
   try {
-    const response = await fetch("http://localhost:3000/scan", {
+    const response = await fetch(`${API_BASE}/scan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(bodyData)
@@ -648,10 +661,11 @@ async function scan() {
     refreshAllDashboardData();
 
   } catch (err) {
+    const endpointHint = API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
     showSocAlert({
       icon: "error",
       title: "Backend Connection Error",
-      text: "Could not reach detection engine at http://localhost:3000. Ensure src/server.js is running."
+      text: `Could not reach detection engine (${endpointHint || "API service"}). Please verify backend service availability.`
     });
     console.error("Scan fetch error:", err);
   } finally {
@@ -2234,7 +2248,7 @@ async function fetchSocTimelineEvents() {
   if (listEl) listEl.style.display = "none";
   if (paginationEl) paginationEl.style.display = "none";
 
-  const apiHost = "http://localhost:3000";
+  const apiHost = API_BASE;
   const params = new URLSearchParams({
     page: String(currentSocTimelinePage),
     limit: String(currentSocTimelineLimit),
