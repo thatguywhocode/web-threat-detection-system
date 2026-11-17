@@ -22,6 +22,68 @@
 <div class="ambient-grid" aria-hidden="true"></div>
 <div class="ambient-glow" aria-hidden="true"></div>
 
+<!-- ================= PHASE 2.5: AUTHENTICATION & FIRST-RUN GATE ================= -->
+<div id="authGateOverlay" class="auth-gate-overlay active" role="dialog" aria-modal="true" aria-labelledby="authGateTitle">
+  <div class="auth-card">
+    <div class="auth-brand-header">
+      <div class="brand-icon auth-brand-icon">
+        <i data-lucide="shield-check" class="icon-24"></i>
+      </div>
+      <div>
+        <h1 class="auth-title" id="authGateTitle">SecuNexis SOC Console</h1>
+        <p class="auth-subtitle" id="authGateSubtitle">Authenticate to access Security Operations telemetry</p>
+      </div>
+    </div>
+
+    <div id="authGateNotice" class="auth-notice" style="display:none;"></div>
+
+    <!-- Standard Analyst Login Form -->
+    <form id="socLoginForm" class="auth-form" onsubmit="handleSocLogin(event)">
+      <div class="auth-field">
+        <label for="loginUsername" class="modal-field-label">Username or Email</label>
+        <input type="text" id="loginUsername" autocomplete="username" required placeholder="analyst@secunexis.local" />
+      </div>
+      <div class="auth-field">
+        <label for="loginPassword" class="modal-field-label">Password</label>
+        <input type="password" id="loginPassword" autocomplete="current-password" required placeholder="Enter password" />
+      </div>
+      <button type="submit" id="loginSubmitBtn" class="btn btn-primary auth-submit-btn">
+        <i data-lucide="lock" class="icon-15"></i>
+        <span>Sign In to SOC Console</span>
+      </button>
+    </form>
+
+    <!-- One-Time Initial Admin Setup Form (only displayed when 0 users exist) -->
+    <form id="socSetupForm" class="auth-form" style="display:none;" onsubmit="handleSocInitialSetup(event)">
+      <div class="auth-setup-banner">
+        <i data-lucide="key-round" class="icon-16"></i>
+        <span>No administrator accounts exist yet. Provision the primary <strong>ADMIN</strong> account below.</span>
+      </div>
+      <div class="auth-field">
+        <label for="setupUsername" class="modal-field-label">Admin Username *</label>
+        <input type="text" id="setupUsername" required placeholder="soc_admin" minlength="3" maxlength="50" />
+      </div>
+      <div class="auth-field">
+        <label for="setupEmail" class="modal-field-label">Admin Email *</label>
+        <input type="email" id="setupEmail" required placeholder="admin@organization.com" />
+      </div>
+      <div class="auth-field">
+        <label for="setupPassword" class="modal-field-label">Strong Password *</label>
+        <input type="password" id="setupPassword" required placeholder="Min 10 chars, upper, lower, digit, symbol" minlength="10" />
+      </div>
+      <button type="submit" id="setupSubmitBtn" class="btn btn-primary auth-submit-btn">
+        <i data-lucide="shield-plus" class="icon-15"></i>
+        <span>Provision Primary Admin</span>
+      </button>
+    </form>
+
+    <div class="auth-footer-meta">
+      <i data-lucide="lock" class="icon-12"></i>
+      <span>HttpOnly Cookie Sessions &bull; RBAC Enforced &bull; Immutable Audit Trail</span>
+    </div>
+  </div>
+</div>
+
 <div class="app-layout">
   <!-- Mobile Sidebar Overlay -->
   <div id="sidebarOverlay" class="sidebar-overlay" onclick="toggleSidebar(false)"></div>
@@ -63,6 +125,29 @@
         <span id="historyBadgeCount" class="nav-badge">0</span>
       </a>
 
+      <div class="nav-section-label">SOC OPERATIONS</div>
+      <a href="#alerts" class="nav-item" data-view="alerts" onclick="switchView('alerts')">
+        <span class="nav-icon"><i data-lucide="bell" class="icon-18"></i></span>
+        <span class="nav-label">Alerts</span>
+        <span id="alertsBadgeCount" class="nav-badge alert-badge">0</span>
+      </a>
+
+      <a href="#incidents" class="nav-item" data-view="incidents" onclick="switchView('incidents')">
+        <span class="nav-icon"><i data-lucide="shield-alert" class="icon-18"></i></span>
+        <span class="nav-label">Incidents</span>
+        <span id="incidentsBadgeCount" class="nav-badge incident-badge">0</span>
+      </a>
+
+      <a href="#audit" class="nav-item" data-view="audit" data-roles="ADMIN,ANALYST" onclick="switchView('audit')" style="display:none;">
+        <span class="nav-icon"><i data-lucide="scroll-text" class="icon-18"></i></span>
+        <span class="nav-label">Audit Trail</span>
+      </a>
+
+      <a href="#users" class="nav-item" data-view="users" data-roles="ADMIN" onclick="switchView('users')" style="display:none;">
+        <span class="nav-icon"><i data-lucide="users" class="icon-18"></i></span>
+        <span class="nav-label">Users &amp; RBAC</span>
+      </a>
+
       <div class="nav-section-label">GOVERNANCE</div>
       <a href="#reports" class="nav-item" data-view="reports" onclick="switchView('reports')">
         <span class="nav-icon"><i data-lucide="file-text" class="icon-18"></i></span>
@@ -78,6 +163,21 @@
     </nav>
 
     <div class="sidebar-footer">
+      <!-- Authenticated Analyst Session Card (Phase 2.5) -->
+      <div id="sidebarUserCard" class="sidebar-user-card" style="display:none;">
+        <div class="sidebar-user-top">
+          <div class="sidebar-user-avatar" id="sidebarUserAvatar">A</div>
+          <div class="sidebar-user-meta">
+            <span class="sidebar-user-name" id="sidebarUserName">Analyst</span>
+            <span class="role-badge" id="sidebarUserRole">VIEWER</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline sidebar-logout-btn" onclick="handleSocLogout()">
+          <i data-lucide="log-out" class="icon-13"></i>
+          <span>Sign Out</span>
+        </button>
+      </div>
+
       <div class="system-status-card">
         <div class="status-pulse-wrap">
           <span class="status-indicator-dot online"></span>
@@ -196,6 +296,42 @@
             <div class="stat-card-footer">
               <span class="stat-subtext">High-confidence threats</span>
             </div>
+          </div>
+        </div>
+
+        <!-- SOC Operations Quick Bar (Phase 2) -->
+        <div class="soc-kpi-grid">
+          <div class="soc-kpi-card" onclick="switchView('incidents')" style="cursor:pointer;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="soc-kpi-title">ACTIVE INCIDENTS</span>
+              <i data-lucide="shield-alert" class="icon-16" style="color:#F59E0B;"></i>
+            </div>
+            <div class="soc-kpi-val" id="dashActiveIncidentsCount" style="color:#F59E0B;">0</div>
+            <div class="soc-kpi-sub">Correlated attack campaigns &bull; Console &rarr;</div>
+          </div>
+          <div class="soc-kpi-card" onclick="switchView('alerts')" style="cursor:pointer;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="soc-kpi-title">OPEN ALERTS</span>
+              <i data-lucide="bell" class="icon-16" style="color:#EF4444;"></i>
+            </div>
+            <div class="soc-kpi-val" id="dashOpenAlertsCount" style="color:#EF4444;">0</div>
+            <div class="soc-kpi-sub">Actionable threat detections &bull; Review &rarr;</div>
+          </div>
+          <div class="soc-kpi-card" onclick="switchView('alerts')" style="cursor:pointer;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="soc-kpi-title">P1 CRITICAL ALERTS</span>
+              <i data-lucide="flame" class="icon-16" style="color:#EF4444;"></i>
+            </div>
+            <div class="soc-kpi-val" id="dashP1AlertsCount" style="color:#EF4444;">0</div>
+            <div class="soc-kpi-sub">Immediate containment required</div>
+          </div>
+          <div class="soc-kpi-card" onclick="switchView('incidents')" style="cursor:pointer;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="soc-kpi-title">RESOLVED INCIDENTS</span>
+              <i data-lucide="check-circle" class="icon-16" style="color:#10B981;"></i>
+            </div>
+            <div class="soc-kpi-val" id="dashResolvedIncidentsCount" style="color:#10B981;">0</div>
+            <div class="soc-kpi-sub">Closed threat lifecycles</div>
           </div>
         </div>
 
@@ -1188,6 +1324,703 @@
           </div>
         </div>
       </section>
+
+      <!-- ================= SECTION 6: SECURITY ALERTS (PHASE 2) ================= -->
+      <section id="view-alerts" class="view-section">
+        <!-- Alerts KPI Grid -->
+        <div class="soc-kpi-grid">
+          <div class="soc-kpi-card">
+            <span class="soc-kpi-title">TOTAL ALERTS</span>
+            <div class="soc-kpi-val" id="kpiTotalAlerts">0</div>
+            <div class="soc-kpi-sub">Triggered threat detections</div>
+          </div>
+          <div class="soc-kpi-card">
+            <span class="soc-kpi-title">P1 CRITICAL</span>
+            <div class="soc-kpi-val" id="kpiP1Alerts" style="color:#EF4444;">0</div>
+            <div class="soc-kpi-sub">Immediate response needed</div>
+          </div>
+          <div class="soc-kpi-card">
+            <span class="soc-kpi-title">P2 HIGH</span>
+            <div class="soc-kpi-val" id="kpiP2Alerts" style="color:#F97316;">0</div>
+            <div class="soc-kpi-sub">High confidence threats</div>
+          </div>
+          <div class="soc-kpi-card">
+            <span class="soc-kpi-title">UNASSIGNED / NEW</span>
+            <div class="soc-kpi-val" id="kpiNewAlerts" style="color:#00B8F0;">0</div>
+            <div class="soc-kpi-sub">Awaiting triage queue</div>
+          </div>
+        </div>
+
+        <!-- Alerts Panel Card -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <div>
+              <h2 class="panel-card-title">Security Alerts Queue</h2>
+              <p class="panel-card-desc">Inspect, triage, and escalate automated security detections</p>
+            </div>
+            <div class="history-actions">
+              <button class="btn btn-sm btn-outline" onclick="fetchSocAlerts(1)">
+                <i data-lucide="refresh-cw" class="icon-14"></i>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-card-body p-0">
+            <!-- Filter Bar -->
+            <div class="soc-filter-bar">
+              <div class="soc-search-wrap">
+                <i data-lucide="search" class="icon-15"></i>
+                <input
+                  type="text"
+                  id="alertSearchInput"
+                  placeholder="Filter alerts by target, title, or alertId..."
+                  oninput="handleAlertSearch()"
+                />
+              </div>
+              <div class="soc-filter-group">
+                <select id="alertSeverityFilter" class="soc-select-filter" onchange="fetchSocAlerts(1)">
+                  <option value="">All Severities</option>
+                  <option value="CRITICAL">Critical</option>
+                  <option value="HIGH">High</option>
+                  <option value="MEDIUM">Medium</option>
+                  <option value="LOW">Low</option>
+                </select>
+                <select id="alertPriorityFilter" class="soc-select-filter" onchange="fetchSocAlerts(1)">
+                  <option value="">All Priorities</option>
+                  <option value="P1_CRITICAL">P1 - Critical</option>
+                  <option value="P2_HIGH">P2 - High</option>
+                  <option value="P3_MEDIUM">P3 - Medium</option>
+                  <option value="P4_LOW">P4 - Low</option>
+                </select>
+                <select id="alertStatusFilter" class="soc-select-filter" onchange="fetchSocAlerts(1)">
+                  <option value="">All Statuses</option>
+                  <option value="NEW">New</option>
+                  <option value="ACKNOWLEDGED">Acknowledged</option>
+                  <option value="IN_TRIAGE">In Triage</option>
+                  <option value="ESCALATED_TO_INCIDENT">Escalated to Incident</option>
+                  <option value="DISMISSED">Dismissed</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Alerts Table -->
+            <div class="table-responsive" data-lenis-prevent>
+              <table class="soc-table">
+                <thead>
+                  <tr>
+                    <th>Alert ID &amp; Threat Title</th>
+                    <th>Target</th>
+                    <th>Severity / Priority</th>
+                    <th>Detection Source</th>
+                    <th>Risk Score</th>
+                    <th>Status</th>
+                    <th>Incident Link</th>
+                    <th class="soc-actions-cell">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="alertsTableBody">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Empty State for Alerts -->
+            <div id="alertsEmptyState" class="table-empty-state" style="display:none;">
+              <div class="empty-icon-wrap">
+                <i data-lucide="shield-check" class="icon-28"></i>
+              </div>
+              <h4>No Security Alerts Found</h4>
+              <p>No active alerts match your current filter parameters or no threats have been triggered.</p>
+            </div>
+
+            <!-- Alerts Pagination -->
+            <div id="alertsPagination" class="soc-filter-bar" style="border-top:1px solid var(--border-card); justify-content:space-between;">
+              <span id="alertsPaginationInfo" class="soc-date-cell">Page 1 of 1</span>
+              <div style="display:flex; gap:8px;">
+                <button id="alertsPrevBtn" class="btn btn-sm btn-outline" onclick="changeAlertsPage(-1)" disabled>Previous</button>
+                <button id="alertsNextBtn" class="btn btn-sm btn-outline" onclick="changeAlertsPage(1)" disabled>Next</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SECTION 7: INCIDENT MANAGEMENT (PHASE 2) ================= -->
+      <section id="view-incidents" class="view-section">
+        <!-- Incidents KPI Grid -->
+        <div class="soc-kpi-grid">
+          <div class="soc-kpi-card">
+            <span class="soc-kpi-title">ACTIVE INCIDENTS</span>
+            <div class="soc-kpi-val" id="kpiActiveIncidents" style="color:#F59E0B;">0</div>
+            <div class="soc-kpi-sub">OPEN &bull; INVESTIGATING</div>
+          </div>
+          <div class="soc-kpi-card">
+            <span class="soc-kpi-title">CRITICAL INCIDENTS</span>
+            <div class="soc-kpi-val" id="kpiCriticalIncidents" style="color:#EF4444;">0</div>
+            <div class="soc-kpi-sub">P1 Severe campaigns</div>
+          </div>
+          <div class="soc-kpi-card">
+            <span class="soc-kpi-title">RESOLVED INCIDENTS</span>
+            <div class="soc-kpi-val" id="kpiResolvedIncidents" style="color:#10B981;">0</div>
+            <div class="soc-kpi-sub">Remediated &amp; verified</div>
+          </div>
+          <div class="soc-kpi-card">
+            <span class="soc-kpi-title">TOTAL INCIDENTS</span>
+            <div class="soc-kpi-val" id="kpiTotalIncidents">0</div>
+            <div class="soc-kpi-sub">All-time campaign records</div>
+          </div>
+        </div>
+
+        <!-- Incidents Panel Card -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <div>
+              <h2 class="panel-card-title">Incident Response Console</h2>
+              <p class="panel-card-desc">Correlated attack campaigns, threat containment, and investigation timelines</p>
+            </div>
+            <div class="history-actions" style="display:flex; gap:10px;">
+              <button class="btn btn-sm btn-primary" onclick="openCreateIncidentModal()">
+                <i data-lucide="plus-circle" class="icon-14"></i>
+                <span>Create Incident</span>
+              </button>
+              <button class="btn btn-sm btn-outline" onclick="fetchSocIncidents(1)">
+                <i data-lucide="refresh-cw" class="icon-14"></i>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-card-body p-0">
+            <!-- Filter Bar -->
+            <div class="soc-filter-bar">
+              <div class="soc-search-wrap">
+                <i data-lucide="search" class="icon-15"></i>
+                <input
+                  type="text"
+                  id="incidentSearchInput"
+                  placeholder="Filter incidents by title, target, or attack vector..."
+                  oninput="handleIncidentSearch()"
+                />
+              </div>
+              <div class="soc-filter-group">
+                <select id="incidentStatusFilter" class="soc-select-filter" onchange="fetchSocIncidents(1)">
+                  <option value="">All Statuses</option>
+                  <option value="OPEN">Open</option>
+                  <option value="INVESTIGATING">Investigating</option>
+                  <option value="RESOLVED">Resolved</option>
+                  <option value="CLOSED">Closed</option>
+                </select>
+                <select id="incidentSeverityFilter" class="soc-select-filter" onchange="fetchSocIncidents(1)">
+                  <option value="">All Severities</option>
+                  <option value="CRITICAL">Critical</option>
+                  <option value="HIGH">High</option>
+                  <option value="MEDIUM">Medium</option>
+                  <option value="LOW">Low</option>
+                </select>
+                <select id="incidentVectorFilter" class="soc-select-filter" onchange="fetchSocIncidents(1)">
+                  <option value="">All Attack Vectors</option>
+                  <option value="CREDENTIAL_HARVESTING">Credential Harvesting</option>
+                  <option value="MALICIOUS_REPUTATION">Malicious Reputation</option>
+                  <option value="SUSPICIOUS_OBFUSCATION">Suspicious Obfuscation</option>
+                  <option value="HIDDEN_ELEMENT_EXPLOIT">Hidden Element Exploit</option>
+                  <option value="DRIVE_BY_DOWNLOAD">Drive-by Download</option>
+                  <option value="ANOMALY_UNKNOWN">Other Anomaly</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Incidents Table -->
+            <div class="table-responsive" data-lenis-prevent>
+              <table class="soc-table">
+                <thead>
+                  <tr>
+                    <th>Incident ID &amp; Campaign Title</th>
+                    <th>Status</th>
+                    <th>Severity / Priority</th>
+                    <th>Attack Vector</th>
+                    <th>Affected Targets</th>
+                    <th>Alerts</th>
+                    <th>Assigned To</th>
+                    <th>Last Updated</th>
+                    <th class="soc-actions-cell">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="incidentsTableBody">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Empty State for Incidents -->
+            <div id="incidentsEmptyState" class="table-empty-state" style="display:none;">
+              <div class="empty-icon-wrap">
+                <i data-lucide="shield" class="icon-28"></i>
+              </div>
+              <h4>No Security Incidents Found</h4>
+              <p>No active incidents match your current filter parameters.</p>
+            </div>
+
+            <!-- Incidents Pagination -->
+            <div id="incidentsPagination" class="soc-filter-bar" style="border-top:1px solid var(--border-card); justify-content:space-between;">
+              <span id="incidentsPaginationInfo" class="soc-date-cell">Page 1 of 1</span>
+              <div style="display:flex; gap:8px;">
+                <button id="incidentsPrevBtn" class="btn btn-sm btn-outline" onclick="changeIncidentsPage(-1)" disabled>Previous</button>
+                <button id="incidentsNextBtn" class="btn btn-sm btn-outline" onclick="changeIncidentsPage(1)" disabled>Next</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= MODALS: ALERT & INCIDENT MANAGEMENT (PHASE 2) ================= -->
+      <!-- Alert Details Modal -->
+      <div id="alertDetailsModal" class="soc-modal-backdrop">
+        <div class="soc-modal-card">
+          <div class="soc-modal-header">
+            <div class="soc-modal-title-wrap">
+              <i data-lucide="bell" class="icon-20" style="color:var(--primary);"></i>
+              <div>
+                <h3 class="soc-modal-title" id="alertModalTitle">Alert Details</h3>
+                <span id="alertModalId" class="soc-date-cell">alt_...</span>
+              </div>
+            </div>
+            <button class="soc-modal-close-btn" onclick="closeAlertModal()">
+              <i data-lucide="x" class="icon-18"></i>
+            </button>
+          </div>
+
+          <div class="soc-modal-body">
+            <div class="modal-grid-2col">
+              <div class="modal-info-panel">
+                <span class="modal-field-label">Target Inspected</span>
+                <span class="modal-field-val" id="alertModalTarget">-</span>
+              </div>
+              <div class="modal-info-panel">
+                <span class="modal-field-label">Detection Source</span>
+                <span class="modal-field-val" id="alertModalSource">-</span>
+              </div>
+              <div class="modal-info-panel">
+                <span class="modal-field-label">Severity &amp; Priority</span>
+                <div id="alertModalSeverityBadge">-</div>
+              </div>
+              <div class="modal-info-panel">
+                <span class="modal-field-label">Risk Score &amp; Verdict</span>
+                <span class="modal-field-val" id="alertModalScore">-</span>
+              </div>
+            </div>
+
+            <div class="modal-info-panel">
+              <span class="modal-field-label">Associated Incident</span>
+              <div id="alertModalIncidentLink" style="display:flex; align-items:center; gap:10px; margin-top:4px;">
+                <span class="soc-date-cell">No incident linked</span>
+              </div>
+            </div>
+
+            <div class="modal-info-panel">
+              <span class="modal-field-label">Threat Evidence Breakdown</span>
+              <div id="alertModalEvidenceList" style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+
+            <!-- Analyst Notes & Audit Log -->
+            <div class="modal-info-panel">
+              <span class="modal-field-label">Analyst Notes</span>
+              <div id="alertModalNotesList" class="investigation-timeline" style="max-height:160px;">
+                <!-- Populated dynamically -->
+              </div>
+              <div class="add-note-box" style="margin-top:10px;">
+                <textarea id="alertNewNoteText" placeholder="Add triage observation or note..."></textarea>
+                <div class="add-note-toolbar">
+                  <input type="text" id="alertNoteAuthor" placeholder="Analyst Name" value="SOC Analyst" />
+                  <button class="btn btn-sm btn-primary" onclick="submitAlertNote()">
+                    <i data-lucide="send" class="icon-13"></i>
+                    <span>Add Note</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="soc-modal-footer">
+            <div style="margin-right:auto; display:flex; align-items:center; gap:8px;">
+              <span class="modal-field-label">Status:</span>
+              <select id="alertModalStatusSelect" class="soc-select-filter" onchange="updateCurrentAlertStatus()">
+                <option value="NEW">NEW</option>
+                <option value="ACKNOWLEDGED">ACKNOWLEDGED</option>
+                <option value="IN_TRIAGE">IN TRIAGE</option>
+                <option value="DISMISSED">DISMISSED</option>
+                <option value="ESCALATED_TO_INCIDENT">ESCALATED TO INCIDENT</option>
+              </select>
+            </div>
+            <button id="alertEscalateBtn" class="btn btn-sm btn-secondary" onclick="escalateCurrentAlertToIncident()">
+              <i data-lucide="shield-alert" class="icon-14"></i>
+              <span>Escalate to Incident</span>
+            </button>
+            <button class="btn btn-sm btn-outline" onclick="closeAlertModal()">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Incident Investigation Modal -->
+      <div id="incidentInvestigationModal" class="soc-modal-backdrop">
+        <div class="soc-modal-card" style="max-width:960px;">
+          <div class="soc-modal-header">
+            <div class="soc-modal-title-wrap">
+              <i data-lucide="shield-alert" class="icon-20" style="color:#F59E0B;"></i>
+              <div>
+                <h3 class="soc-modal-title" id="incidentModalTitle">Incident Investigation</h3>
+                <span id="incidentModalId" class="soc-date-cell">inc_...</span>
+              </div>
+            </div>
+            <button class="soc-modal-close-btn" onclick="closeIncidentModal()">
+              <i data-lucide="x" class="icon-18"></i>
+            </button>
+          </div>
+
+          <div class="soc-modal-body">
+            <!-- Incident KPI strip -->
+            <div class="modal-grid-2col">
+              <div class="modal-info-panel">
+                <span class="modal-field-label">Status &amp; Severity</span>
+                <div style="display:flex; align-items:center; gap:8px; margin-top:4px;" id="incidentModalStatusBadges">
+                  <!-- Badges -->
+                </div>
+              </div>
+              <div class="modal-info-panel">
+                <span class="modal-field-label">Attack Vector &amp; Assignment</span>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:4px;">
+                  <span class="vector-chip" id="incidentModalVector">ANOMALY_UNKNOWN</span>
+                  <span class="soc-date-cell" id="incidentModalAssignee">Unassigned</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Affected Targets & Exfiltration -->
+            <div class="modal-grid-2col">
+              <div class="modal-info-panel">
+                <span class="modal-field-label">Affected Targets (<span id="incidentModalTargetCount">0</span>)</span>
+                <div id="incidentModalTargetsList" style="display:flex; flex-direction:column; gap:4px; margin-top:6px; max-height:120px; overflow-y:auto;">
+                  <!-- Target items -->
+                </div>
+              </div>
+              <div class="modal-info-panel">
+                <span class="modal-field-label">Exfiltration Endpoints / C2 Destinations</span>
+                <div id="incidentModalExfilList" style="display:flex; flex-direction:column; gap:4px; margin-top:6px; max-height:120px; overflow-y:auto;">
+                  <!-- Exfil items -->
+                </div>
+              </div>
+            </div>
+
+            <!-- Remediation Guidance Checklist -->
+            <div class="modal-info-panel">
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <span class="modal-field-label">Remediation Guidance &amp; Containment</span>
+                <span id="incidentRemediationStatus" class="soc-date-cell">In Progress</span>
+              </div>
+              <p id="incidentRemediationSummary" style="font-size:12.5px; color:var(--text-secondary); margin-top:4px;"></p>
+              <div id="incidentRemediationSteps" class="remediation-steps-list">
+                <!-- Step items -->
+              </div>
+            </div>
+
+            <!-- Correlated Alerts -->
+            <div class="modal-info-panel">
+              <span class="modal-field-label">Correlated Security Alerts (<span id="incidentModalAlertCount">0</span>)</span>
+              <div id="incidentModalAlertsList" style="display:flex; flex-direction:column; gap:6px; margin-top:6px; max-height:140px; overflow-y:auto;">
+                <!-- Alert items -->
+              </div>
+            </div>
+
+            <!-- Interactive Investigation Notes Log -->
+            <div class="modal-info-panel">
+              <span class="modal-field-label">Interactive Investigation Notes &amp; Audit Trail</span>
+              <div id="incidentNotesTimeline" class="investigation-timeline">
+                <!-- Note entries -->
+              </div>
+              <div class="add-note-box" style="margin-top:12px;">
+                <textarea id="incidentNewNoteText" placeholder="Log containment actions, forensic observations, or triage updates..."></textarea>
+                <div class="add-note-toolbar">
+                  <input type="text" id="incidentNoteAuthor" placeholder="Analyst Name" value="SOC Analyst" />
+                  <button class="btn btn-sm btn-primary" onclick="submitIncidentNote()">
+                    <i data-lucide="send" class="icon-13"></i>
+                    <span>Log Note</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="soc-modal-footer">
+            <div style="margin-right:auto; display:flex; align-items:center; gap:8px;">
+              <span class="modal-field-label">Status:</span>
+              <select id="incidentModalStatusSelect" class="soc-select-filter" onchange="updateCurrentIncidentStatus()">
+                <option value="OPEN">OPEN</option>
+                <option value="INVESTIGATING">INVESTIGATING</option>
+                <option value="RESOLVED">RESOLVED</option>
+                <option value="CLOSED">CLOSED</option>
+              </select>
+            </div>
+            <button class="btn btn-sm btn-outline" onclick="closeIncidentModal()">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Create Incident Modal -->
+      <div id="createIncidentModal" class="soc-modal-backdrop">
+        <div class="soc-modal-card" style="max-width:640px;">
+          <div class="soc-modal-header">
+            <div class="soc-modal-title-wrap">
+              <i data-lucide="plus-circle" class="icon-20" style="color:var(--primary);"></i>
+              <h3 class="soc-modal-title">Establish New Incident</h3>
+            </div>
+            <button class="soc-modal-close-btn" onclick="closeCreateIncidentModal()">
+              <i data-lucide="x" class="icon-18"></i>
+            </button>
+          </div>
+
+          <div class="soc-modal-body">
+            <div class="add-note-box">
+              <label class="modal-field-label">Incident Title *</label>
+              <input type="text" id="newIncidentTitle" style="background:#0D1627; border:1px solid var(--border-card); border-radius:6px; padding:8px 12px; color:var(--text-main); font-size:13px; width:100%; outline:none;" placeholder="e.g. Credential Phishing Campaign targeting auth.internal.corp" />
+            </div>
+
+            <div class="modal-grid-2col">
+              <div class="add-note-box">
+                <label class="modal-field-label">Severity *</label>
+                <select id="newIncidentSeverity" class="soc-select-filter" style="width:100%; padding:8px 10px;">
+                  <option value="CRITICAL">CRITICAL</option>
+                  <option value="HIGH" selected>HIGH</option>
+                  <option value="MEDIUM">MEDIUM</option>
+                  <option value="LOW">LOW</option>
+                </select>
+              </div>
+              <div class="add-note-box">
+                <label class="modal-field-label">Priority *</label>
+                <select id="newIncidentPriority" class="soc-select-filter" style="width:100%; padding:8px 10px;">
+                  <option value="P1_CRITICAL">P1 - Critical</option>
+                  <option value="P2_HIGH" selected>P2 - High</option>
+                  <option value="P3_MEDIUM">P3 - Medium</option>
+                  <option value="P4_LOW">P4 - Low</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="modal-grid-2col">
+              <div class="add-note-box">
+                <label class="modal-field-label">Attack Vector</label>
+                <select id="newIncidentVector" class="soc-select-filter" style="width:100%; padding:8px 10px;">
+                  <option value="CREDENTIAL_HARVESTING">Credential Harvesting</option>
+                  <option value="MALICIOUS_REPUTATION">Malicious Reputation</option>
+                  <option value="SUSPICIOUS_OBFUSCATION">Suspicious Obfuscation</option>
+                  <option value="HIDDEN_ELEMENT_EXPLOIT">Hidden Element Exploit</option>
+                  <option value="DRIVE_BY_DOWNLOAD">Drive-by Download</option>
+                  <option value="ANOMALY_UNKNOWN" selected>Anomaly / Other</option>
+                </select>
+              </div>
+              <div class="add-note-box">
+                <label class="modal-field-label">Assigned Analyst</label>
+                <input type="text" id="newIncidentAssignee" style="background:#0D1627; border:1px solid var(--border-card); border-radius:6px; padding:8px 10px; color:var(--text-main); font-size:13px; width:100%; outline:none;" placeholder="Analyst Name" value="Unassigned" />
+              </div>
+            </div>
+
+            <div class="add-note-box">
+              <label class="modal-field-label">Affected Target(s) (comma separated)</label>
+              <input type="text" id="newIncidentTargets" style="background:#0D1627; border:1px solid var(--border-card); border-radius:6px; padding:8px 12px; color:var(--text-main); font-size:13px; width:100%; outline:none;" placeholder="e.g. https://bad-target.xyz, http://185.220.101.5" />
+            </div>
+
+            <div class="add-note-box">
+              <label class="modal-field-label">Initial Investigation Note</label>
+              <textarea id="newIncidentInitialNote" placeholder="Context, observed threat telemetry, or initial triage reason..."></textarea>
+            </div>
+          </div>
+
+          <div class="soc-modal-footer">
+            <button class="btn btn-sm btn-outline" onclick="closeCreateIncidentModal()">Cancel</button>
+            <button class="btn btn-sm btn-primary" onclick="submitCreateIncident()">
+              <i data-lucide="check" class="icon-14"></i>
+              <span>Create Incident</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= SECTION 8: IMMUTABLE AUDIT TRAIL (PHASE 2.5) ================= -->
+      <section id="view-audit" class="view-section">
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <div>
+              <h2 class="panel-card-title">Immutable Security Audit Trail</h2>
+              <p class="panel-card-desc">Append-only, SHA-256 hash-chained log of authentication, triage, RBAC, and incident mutations</p>
+            </div>
+            <div class="history-actions" style="display:flex; gap:10px;">
+              <button id="verifyAuditChainBtn" class="btn btn-sm btn-secondary" data-roles="ADMIN" onclick="verifySocAuditChain()" style="display:none;">
+                <i data-lucide="shield-check" class="icon-14"></i>
+                <span>Verify Hash Chain</span>
+              </button>
+              <button class="btn btn-sm btn-outline" onclick="fetchSocAuditLogs(1)">
+                <i data-lucide="refresh-cw" class="icon-14"></i>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-card-body p-0">
+            <div class="soc-filter-bar">
+              <div class="soc-search-wrap">
+                <i data-lucide="search" class="icon-15"></i>
+                <input
+                  type="text"
+                  id="auditActorFilter"
+                  placeholder="Filter by actor username..."
+                  oninput="handleAuditSearch()"
+                />
+              </div>
+              <div class="soc-filter-group">
+                <select id="auditEntityFilter" class="soc-select-filter" onchange="fetchSocAuditLogs(1)">
+                  <option value="">All Entities</option>
+                  <option value="AUTH">Auth</option>
+                  <option value="SESSION">Session</option>
+                  <option value="USER">User</option>
+                  <option value="ALERT">Alert</option>
+                  <option value="INCIDENT">Incident</option>
+                  <option value="ENDPOINT">Endpoint</option>
+                </select>
+                <select id="auditOutcomeFilter" class="soc-select-filter" onchange="fetchSocAuditLogs(1)">
+                  <option value="">All Outcomes</option>
+                  <option value="SUCCESS">Success</option>
+                  <option value="FAILURE">Failure</option>
+                  <option value="DENIED">Denied</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="table-responsive" data-lenis-prevent>
+              <table class="soc-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Actor &amp; Role</th>
+                    <th>Action</th>
+                    <th>Entity Reference</th>
+                    <th>Outcome</th>
+                    <th>Details</th>
+                    <th>Integrity Hash</th>
+                  </tr>
+                </thead>
+                <tbody id="auditTableBody"></tbody>
+              </table>
+            </div>
+
+            <div id="auditEmptyState" class="table-empty-state" style="display:none;">
+              <div class="empty-icon-wrap">
+                <i data-lucide="scroll-text" class="icon-28"></i>
+              </div>
+              <h4>No Audit Events Found</h4>
+              <p>No immutable audit records match your current filter.</p>
+            </div>
+
+            <div id="auditPagination" class="soc-filter-bar" style="border-top:1px solid var(--border-card); justify-content:space-between;">
+              <span id="auditPaginationInfo" class="soc-date-cell">Page 1 of 1</span>
+              <div style="display:flex; gap:8px;">
+                <button id="auditPrevBtn" class="btn btn-sm btn-outline" onclick="changeAuditPage(-1)" disabled>Previous</button>
+                <button id="auditNextBtn" class="btn btn-sm btn-outline" onclick="changeAuditPage(1)" disabled>Next</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SECTION 9: ADMIN USER & RBAC MANAGEMENT (PHASE 2.5) ================= -->
+      <section id="view-users" class="view-section">
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <div>
+              <h2 class="panel-card-title">SOC User &amp; Role Management</h2>
+              <p class="panel-card-desc">Administer analyst credentials, role-based access control (ADMIN, ANALYST, VIEWER), and lockouts</p>
+            </div>
+            <div class="history-actions" style="display:flex; gap:10px;">
+              <button class="btn btn-sm btn-primary" onclick="openCreateUserModal()">
+                <i data-lucide="user-plus" class="icon-14"></i>
+                <span>Provision User</span>
+              </button>
+              <button class="btn btn-sm btn-outline" onclick="fetchSocUsers()">
+                <i data-lucide="refresh-cw" class="icon-14"></i>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-card-body p-0">
+            <div class="table-responsive" data-lenis-prevent>
+              <table class="soc-table">
+                <thead>
+                  <tr>
+                    <th>Username &amp; Display Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th class="soc-actions-cell">Admin Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="usersTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Create User Modal (ADMIN Only) -->
+      <div id="createUserModal" class="soc-modal-backdrop">
+        <div class="soc-modal-card" style="max-width:560px;">
+          <div class="soc-modal-header">
+            <div class="soc-modal-title-wrap">
+              <i data-lucide="user-plus" class="icon-20" style="color:var(--primary);"></i>
+              <h3 class="soc-modal-title">Provision SOC User</h3>
+            </div>
+            <button class="soc-modal-close-btn" onclick="closeCreateUserModal()">
+              <i data-lucide="x" class="icon-18"></i>
+            </button>
+          </div>
+          <div class="soc-modal-body">
+            <div class="modal-grid-2col">
+              <div class="add-note-box">
+                <label class="modal-field-label">Username *</label>
+                <input type="text" id="newUserUsername" class="soc-text-input" placeholder="j.doe" />
+              </div>
+              <div class="add-note-box">
+                <label class="modal-field-label">Role *</label>
+                <select id="newUserRole" class="soc-select-filter" style="width:100%; padding:8px 10px;">
+                  <option value="ANALYST" selected>ANALYST (Investigate &amp; Triage)</option>
+                  <option value="VIEWER">VIEWER (Read-Only)</option>
+                  <option value="ADMIN">ADMIN (Full Access)</option>
+                </select>
+              </div>
+            </div>
+            <div class="add-note-box">
+              <label class="modal-field-label">Email *</label>
+              <input type="email" id="newUserEmail" class="soc-text-input" placeholder="analyst@organization.com" />
+            </div>
+            <div class="add-note-box">
+              <label class="modal-field-label">Display Name</label>
+              <input type="text" id="newUserDisplayName" class="soc-text-input" placeholder="Jane Doe" />
+            </div>
+            <div class="add-note-box">
+              <label class="modal-field-label">Initial Password * (min 10 chars, upper, lower, digit, symbol)</label>
+              <input type="password" id="newUserPassword" class="soc-text-input" placeholder="Strong temporary password" />
+            </div>
+          </div>
+          <div class="soc-modal-footer">
+            <button class="btn btn-sm btn-outline" onclick="closeCreateUserModal()">Cancel</button>
+            <button class="btn btn-sm btn-primary" onclick="submitCreateUser()">
+              <i data-lucide="check" class="icon-14"></i>
+              <span>Create Account</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
     </main>
   </div>

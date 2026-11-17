@@ -1,44 +1,35 @@
 /**
- * SentinelCore — SOC Event Management Express Routes (v1.0)
+ * SentinelCore / SecuNexis — SOC Event Management Express Routes (Hardened Phase 2.5)
  *
- * Implements additive SOC Event Management API endpoints:
- * - GET  /api/soc/events       (Filtered, paginated SOC security event feed)
- * - GET  /api/soc/events/stats (Aggregate SOC event telemetry)
- * - GET  /api/soc/events/:id   (Individual SOC security event inspection)
- * - POST /api/soc/events       (Additive event ingestion endpoint)
+ * Implements RBAC-protected SOC Event Management API endpoints:
+ * - GET  /api/soc/events       (ADMIN, ANALYST, VIEWER) Filtered, paginated SOC security event feed
+ * - GET  /api/soc/events/stats (ADMIN, ANALYST, VIEWER) Aggregate SOC event telemetry
+ * - GET  /api/soc/events/:id   (ADMIN, ANALYST, VIEWER) Individual SOC security event inspection
+ * - POST /api/soc/events       (ADMIN, ANALYST + CSRF)  Additive event ingestion endpoint
  */
 
 const express = require("express");
 const { getEvents, getEventById, getEventStats, recordScanEvent } = require("./eventService");
+const { requireAuth, requireRole, verifyCsrf } = require("../auth/authMiddleware");
+const { isValidEntityId, sendSafeError } = require("../security/securityMiddleware");
 
 const router = express.Router();
 
+// Protect all SOC event routes behind authentication
+router.use(requireAuth);
+
 /* ================= 1. GET /api/soc/events ================= */
-/**
- * Query filters:
- * - verdict:   "SAFE" | "SUSPICIOUS" | "MALICIOUS" | "INCONCLUSIVE" (or comma-separated)
- * - severity:  "LOW" | "MEDIUM" | "HIGH"
- * - target:    partial substring search (sanitized)
- * - from / to: ISO date strings (e.g. 2026-11-01T00:00:00Z)
- * - page:      integer >= 1 (default 1)
- * - limit:     integer 1-100 (default 20)
- * - sort:      "newest" | "oldest" | "score_desc" | "score_asc"
- */
-router.get("/", async (req, res) => {
+router.get("/", requireRole("ADMIN", "ANALYST", "VIEWER"), async (req, res) => {
   try {
     const result = await getEvents(req.query);
     return res.status(200).json(result);
   } catch (err) {
-    console.error("SOC events query error:", err.message);
-    return res.status(500).json({
-      success: false,
-      error: "Internal SOC event query failure"
-    });
+    return sendSafeError(res, 500, "Internal SOC event query failure", err);
   }
 });
 
 /* ================= 2. GET /api/soc/events/stats ================= */
-router.get("/stats", async (req, res) => {
+router.get("/stats", requireRole("ADMIN", "ANALYST", "VIEWER"), async (req, res) => {
   try {
     const stats = await getEventStats();
     return res.status(200).json({
@@ -46,19 +37,15 @@ router.get("/stats", async (req, res) => {
       stats
     });
   } catch (err) {
-    console.error("SOC events stats error:", err.message);
-    return res.status(500).json({
-      success: false,
-      error: "Failed to retrieve SOC telemetry statistics"
-    });
+    return sendSafeError(res, 500, "Failed to retrieve SOC telemetry statistics", err);
   }
 });
 
 /* ================= 3. GET /api/soc/events/:id ================= */
-router.get("/:id", async (req, res) => {
+router.get("/:id", requireRole("ADMIN", "ANALYST", "VIEWER"), async (req, res) => {
   try {
     const { id } = req.params;
-    if (!id || typeof id !== "string" || id.length > 80) {
+    if (!isValidEntityId(id)) {
       return res.status(400).json({
         success: false,
         error: "Invalid event ID format"
@@ -78,16 +65,12 @@ router.get("/:id", async (req, res) => {
       event
     });
   } catch (err) {
-    console.error("SOC event lookup error:", err.message);
-    return res.status(500).json({
-      success: false,
-      error: "Failed to retrieve security event"
-    });
+    return sendSafeError(res, 500, "Failed to retrieve security event", err);
   }
 });
 
 /* ================= 4. POST /api/soc/events (Additive Ingestion) ================= */
-router.post("/", async (req, res) => {
+router.post("/", requireRole("ADMIN", "ANALYST"), verifyCsrf, async (req, res) => {
   try {
     const { scanInput, scanResult, target, url, html } = req.body || {};
 
@@ -107,7 +90,7 @@ router.post("/", async (req, res) => {
       {
         clientIp: req.ip || req.socket?.remoteAddress || "127.0.0.1",
         userAgent: req.headers["user-agent"] || "",
-        source: "API_INGESTION"
+        source: `API_INGESTION:${req.user.username}`
       }
     );
 
@@ -117,11 +100,7 @@ router.post("/", async (req, res) => {
       event
     });
   } catch (err) {
-    console.error("SOC event ingestion error:", err.message);
-    return res.status(500).json({
-      success: false,
-      error: "Failed to ingest SOC security event"
-    });
+    return sendSafeError(res, 500, "Failed to ingest SOC security event", err);
   }
 });
 

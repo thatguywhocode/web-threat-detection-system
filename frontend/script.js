@@ -111,18 +111,14 @@ window.onload = () => {
 
   // Hash-based navigation or default to dashboard
   const initialHash = window.location.hash.replace("#", "") || "dashboard";
-  if (["dashboard", "scanner", "history", "reports", "settings"].includes(initialHash)) {
-    switchView(initialHash, false);
+  if (["dashboard", "scanner", "history", "reports", "settings", "alerts", "incidents", "audit", "users"].includes(initialHash)) {
+    window.__pendingInitialView = initialHash;
   } else {
-    switchView("dashboard", false);
+    window.__pendingInitialView = "dashboard";
   }
 
-  // Initial data rendering from sessionStorage
-  refreshAllDashboardData();
-
-  // Initialize Enterprise SOC Timeline Stream & Controls
+  // Initialize Enterprise SOC Timeline Controls
   initSocTimelineControls();
-  fetchSocTimelineEvents();
 
   // Dynamic API Host display in Settings view
   const configHostEl = document.getElementById("configApiHost");
@@ -133,6 +129,9 @@ window.onload = () => {
   // Hide download button initially
   const downloadBtn = document.getElementById("downloadBtn");
   if (downloadBtn) downloadBtn.style.display = "none";
+
+  // Gate console behind server-verified authentication session
+  initSocAuthGate();
 
   // Entrance stagger animation via GSAP
   animateInitialEntrance();
@@ -238,8 +237,38 @@ function switchView(viewName, animate = true) {
       crumb: "CONFIGURATION",
       title: "Detection Engine Configuration",
       subtitle: "Heuristic thresholds, calibration policies, and API integration parameters"
+    },
+    alerts: {
+      crumb: "SOC ALERTS",
+      title: "Security Alert Management",
+      subtitle: "Real-time actionable threat alerts, triage queue, and escalation workflows"
+    },
+    incidents: {
+      crumb: "INCIDENT CONSOLE",
+      title: "Security Incident Response Console",
+      subtitle: "Correlated attack campaigns, threat containment, and investigation notes"
+    },
+    audit: {
+      crumb: "IMMUTABLE AUDIT",
+      title: "Security Audit Trail",
+      subtitle: "Append-only SHA-256 chained record of authentication, RBAC, alert, and incident operations"
+    },
+    users: {
+      crumb: "ACCESS CONTROL",
+      title: "SOC User & Role Management",
+      subtitle: "Provision accounts, assign ADMIN / ANALYST / VIEWER roles, and manage lockouts"
     }
   };
+
+  // Client-side UX guard (strictly backed by server-side RBAC)
+  if (viewName === "users" && socCurrentUser && socCurrentUser.role !== "ADMIN") {
+    showSocAlert({ icon: "error", title: "Access Denied", text: "User & RBAC management requires the ADMIN role." });
+    return switchView("dashboard", animate);
+  }
+  if (viewName === "audit" && socCurrentUser && !["ADMIN", "ANALYST"].includes(socCurrentUser.role)) {
+    showSocAlert({ icon: "error", title: "Access Denied", text: "Audit Trail access requires ADMIN or ANALYST permissions." });
+    return switchView("dashboard", animate);
+  }
 
   if (pageMeta[viewName]) {
     if (crumbEl) crumbEl.innerText = pageMeta[viewName].crumb;
@@ -272,9 +301,29 @@ function switchView(viewName, animate = true) {
     );
   }
 
-  // Refresh relevant view data
-  if (viewName === "dashboard" || viewName === "history") {
-    refreshAllDashboardData();
+  // Refresh relevant view data (only when authenticated)
+  if (socCurrentUser) {
+    if (viewName === "dashboard" || viewName === "history") {
+      refreshAllDashboardData();
+    }
+
+    if (viewName === "alerts") {
+      fetchSocAlerts(1);
+      fetchSocAlertStats();
+    }
+
+    if (viewName === "incidents") {
+      fetchSocIncidents(1);
+      fetchSocIncidentStats();
+    }
+
+    if (viewName === "audit") {
+      fetchSocAuditLogs(1);
+    }
+
+    if (viewName === "users") {
+      fetchSocUsers();
+    }
   }
 
   if (viewName === "dashboard") {
@@ -1878,6 +1927,8 @@ function refreshAllDashboardData() {
   updateThreatAnalyticsChart(safeCount, suspiciousCount, maliciousCount, total);
   updateActivityTimelineChart(history);
   fetchSocTimelineEvents();
+  fetchSocAlertStats();
+  fetchSocIncidentStats();
 
   // Update Recent & Full History Tables
   renderDashboardRecentTable(history.slice(0, 5));
@@ -2259,8 +2310,11 @@ async function fetchSocTimelineEvents() {
     params.set("verdict", currentSocTimelineVerdict);
   }
 
+  if (!socCurrentUser) return;
+
   try {
-    const res = await fetch(`${apiHost}/api/soc/events?${params.toString()}`);
+    const res = await socFetch(`${apiHost}/api/soc/events?${params.toString()}`);
+    if (!res) return;
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText || "Service Unavailable"}`);
     }
@@ -2923,3 +2977,1366 @@ function renderHistory() {
     list.appendChild(li);
   });
 }
+
+// ==========================================================================
+// PHASE 2: ENTERPRISE SOC ALERT & INCIDENT MANAGEMENT JAVASCRIPT
+// ==========================================================================
+
+let socAlertsCurrentPage = 1;
+let socAlertsTotalPages = 1;
+let currentActiveAlert = null;
+let alertSearchDebounce = null;
+
+let socIncidentsCurrentPage = 1;
+let socIncidentsTotalPages = 1;
+let currentActiveIncident = null;
+let incidentSearchDebounce = null;
+
+// ================= 1. SOC STATISTICS FETCHERS =================
+async function fetchSocAlertStats() {
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/alerts/stats`);
+    if (!res.ok) return;
+    const json = await res.json();
+    if (!json.success || !json.data) return;
+
+    const stats = json.data;
+
+    // Badges & Counters
+    const alertBadge = document.getElementById("alertsBadgeCount");
+    if (alertBadge) alertBadge.innerText = stats.totalAlerts || 0;
+
+    const dashOpen = document.getElementById("dashOpenAlertsCount");
+    if (dashOpen) dashOpen.innerText = (stats.byStatus?.NEW || 0) + (stats.byStatus?.IN_TRIAGE || 0);
+
+    const dashP1 = document.getElementById("dashP1AlertsCount");
+    if (dashP1) dashP1.innerText = stats.byPriority?.P1_CRITICAL || 0;
+
+    // View KPIs
+    const kpiTotal = document.getElementById("kpiTotalAlerts");
+    if (kpiTotal) kpiTotal.innerText = stats.totalAlerts || 0;
+
+    const kpiP1 = document.getElementById("kpiP1Alerts");
+    if (kpiP1) kpiP1.innerText = stats.byPriority?.P1_CRITICAL || 0;
+
+    const kpiP2 = document.getElementById("kpiP2Alerts");
+    if (kpiP2) kpiP2.innerText = stats.byPriority?.P2_HIGH || 0;
+
+    const kpiNew = document.getElementById("kpiNewAlerts");
+    if (kpiNew) kpiNew.innerText = stats.byStatus?.NEW || 0;
+
+  } catch (err) {
+    console.warn("[SOC Alerts] Stats fetch error:", err.message);
+  }
+}
+
+async function fetchSocIncidentStats() {
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/incidents/stats`);
+    if (!res.ok) return;
+    const json = await res.json();
+    if (!json.success || !json.data) return;
+
+    const stats = json.data;
+
+    // Badges & Dashboard KPIs
+    const incBadge = document.getElementById("incidentsBadgeCount");
+    if (incBadge) incBadge.innerText = stats.activeIncidents || 0;
+
+    const dashActive = document.getElementById("dashActiveIncidentsCount");
+    if (dashActive) dashActive.innerText = stats.activeIncidents || 0;
+
+    const dashResolved = document.getElementById("dashResolvedIncidentsCount");
+    if (dashResolved) dashResolved.innerText = stats.byStatus?.RESOLVED || 0;
+
+    // View KPIs
+    const kpiActive = document.getElementById("kpiActiveIncidents");
+    if (kpiActive) kpiActive.innerText = stats.activeIncidents || 0;
+
+    const kpiCritical = document.getElementById("kpiCriticalIncidents");
+    if (kpiCritical) kpiCritical.innerText = stats.bySeverity?.CRITICAL || 0;
+
+    const kpiResolved = document.getElementById("kpiResolvedIncidents");
+    if (kpiResolved) kpiResolved.innerText = stats.byStatus?.RESOLVED || 0;
+
+    const kpiTotal = document.getElementById("kpiTotalIncidents");
+    if (kpiTotal) kpiTotal.innerText = stats.totalIncidents || 0;
+
+  } catch (err) {
+    console.warn("[SOC Incidents] Stats fetch error:", err.message);
+  }
+}
+
+// ================= 2. ALERTS LIST & FILTERING =================
+function handleAlertSearch() {
+  clearTimeout(alertSearchDebounce);
+  alertSearchDebounce = setTimeout(() => {
+    fetchSocAlerts(1);
+  }, 300);
+}
+
+function changeAlertsPage(delta) {
+  const newPage = socAlertsCurrentPage + delta;
+  if (newPage >= 1 && newPage <= socAlertsTotalPages) {
+    fetchSocAlerts(newPage);
+  }
+}
+
+async function fetchSocAlerts(page = 1) {
+  socAlertsCurrentPage = page;
+  const tbody = document.getElementById("alertsTableBody");
+  const emptyState = document.getElementById("alertsEmptyState");
+  const paginationInfo = document.getElementById("alertsPaginationInfo");
+  const prevBtn = document.getElementById("alertsPrevBtn");
+  const nextBtn = document.getElementById("alertsNextBtn");
+
+  const searchInput = document.getElementById("alertSearchInput")?.value.trim() || "";
+  const severity = document.getElementById("alertSeverityFilter")?.value || "";
+  const priority = document.getElementById("alertPriorityFilter")?.value || "";
+  const status = document.getElementById("alertStatusFilter")?.value || "";
+
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: "15"
+  });
+
+  if (searchInput) params.append("target", searchInput);
+  if (severity) params.append("severity", severity);
+  if (priority) params.append("priority", priority);
+  if (status) params.append("status", status);
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/alerts?${params.toString()}`);
+    if (!res.ok) throw new Error("Failed to load alerts");
+    const json = await res.json();
+
+    const alerts = json.data || [];
+    const pagination = json.pagination || { totalPages: 1, total: 0 };
+    socAlertsTotalPages = pagination.totalPages || 1;
+
+    if (paginationInfo) {
+      paginationInfo.innerText = `Showing page ${page} of ${socAlertsTotalPages} (${pagination.total} alerts)`;
+    }
+    if (prevBtn) prevBtn.disabled = page <= 1;
+    if (nextBtn) nextBtn.disabled = page >= socAlertsTotalPages;
+
+    if (!alerts.length) {
+      if (tbody) tbody.innerHTML = "";
+      if (emptyState) emptyState.style.display = "block";
+      return;
+    }
+
+    if (emptyState) emptyState.style.display = "none";
+    if (tbody) {
+      tbody.innerHTML = alerts.map(a => {
+        const prioClass = (a.priority || "P3_MEDIUM").toLowerCase().replace(/[^a-z0-9]/g, "_");
+        const statusClass = (a.status || "NEW").toLowerCase();
+        const dateStr = a.createdAt ? new Date(a.createdAt).toLocaleString() : "--";
+        const incidentLink = a.incidentId
+          ? `<button class="btn btn-sm btn-outline" style="padding:2px 8px; font-size:11px;" onclick="openIncidentModal('${escapeHtml(a.incidentId)}')"><i data-lucide="shield-alert" class="icon-12"></i> ${escapeHtml(a.incidentId.slice(0, 10))}...</button>`
+          : `<span class="soc-date-cell">Unlinked</span>`;
+
+        return `
+          <tr>
+            <td>
+              <div style="font-weight:600; color:var(--text-main); font-size:13px;">${escapeHtml(a.title)}</div>
+              <div class="soc-date-cell">${escapeHtml(a.alertId)} &bull; ${dateStr}</div>
+            </td>
+            <td>
+              <div class="soc-target-cell" title="${escapeHtml(a.target)}">${escapeHtml(a.target)}</div>
+            </td>
+            <td>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="priority-chip ${prioClass}">${escapeHtml(a.priority?.replace("_", " ") || "P3")}</span>
+              </div>
+            </td>
+            <td>
+              <span class="vector-chip">${escapeHtml(a.detectionSource || "STATIC")}</span>
+            </td>
+            <td>
+              <span class="mono" style="font-weight:700; color:${a.riskScore >= 70 ? 'var(--color-malicious)' : a.riskScore >= 40 ? 'var(--color-suspicious)' : 'var(--color-safe)'}">${a.riskScore}/100</span>
+            </td>
+            <td>
+              <span class="alert-status-chip ${statusClass}">${escapeHtml(a.status)}</span>
+            </td>
+            <td>
+              ${incidentLink}
+            </td>
+            <td class="soc-actions-cell">
+              <button class="btn btn-sm btn-primary" onclick="openAlertModal('${escapeHtml(a.alertId)}')">
+                <i data-lucide="eye" class="icon-13"></i>
+                <span>Triage</span>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+      refreshIcons();
+    }
+
+  } catch (err) {
+    console.error("[SOC Alerts] Fetch error:", err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:20px; color:#EF4444;">Error loading alerts: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+// ================= 3. INCIDENTS LIST & FILTERING =================
+function handleIncidentSearch() {
+  clearTimeout(incidentSearchDebounce);
+  incidentSearchDebounce = setTimeout(() => {
+    fetchSocIncidents(1);
+  }, 300);
+}
+
+function changeIncidentsPage(delta) {
+  const newPage = socIncidentsCurrentPage + delta;
+  if (newPage >= 1 && newPage <= socIncidentsTotalPages) {
+    fetchSocIncidents(newPage);
+  }
+}
+
+async function fetchSocIncidents(page = 1) {
+  socIncidentsCurrentPage = page;
+  const tbody = document.getElementById("incidentsTableBody");
+  const emptyState = document.getElementById("incidentsEmptyState");
+  const paginationInfo = document.getElementById("incidentsPaginationInfo");
+  const prevBtn = document.getElementById("incidentsPrevBtn");
+  const nextBtn = document.getElementById("incidentsNextBtn");
+
+  const searchInput = document.getElementById("incidentSearchInput")?.value.trim() || "";
+  const status = document.getElementById("incidentStatusFilter")?.value || "";
+  const severity = document.getElementById("incidentSeverityFilter")?.value || "";
+  const vector = document.getElementById("incidentVectorFilter")?.value || "";
+
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: "15"
+  });
+
+  if (searchInput) params.append("target", searchInput);
+  if (status) params.append("status", status);
+  if (severity) params.append("severity", severity);
+  if (vector) params.append("attackVector", vector);
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/incidents?${params.toString()}`);
+    if (!res.ok) throw new Error("Failed to load incidents");
+    const json = await res.json();
+
+    const incidents = json.data || [];
+    const pagination = json.pagination || { totalPages: 1, total: 0 };
+    socIncidentsTotalPages = pagination.totalPages || 1;
+
+    if (paginationInfo) {
+      paginationInfo.innerText = `Showing page ${page} of ${socIncidentsTotalPages} (${pagination.total} incidents)`;
+    }
+    if (prevBtn) prevBtn.disabled = page <= 1;
+    if (nextBtn) nextBtn.disabled = page >= socIncidentsTotalPages;
+
+    if (!incidents.length) {
+      if (tbody) tbody.innerHTML = "";
+      if (emptyState) emptyState.style.display = "block";
+      return;
+    }
+
+    if (emptyState) emptyState.style.display = "none";
+    if (tbody) {
+      tbody.innerHTML = incidents.map(inc => {
+        const statusClass = (inc.status || "OPEN").toLowerCase();
+        const prioClass = (inc.priority || "P3_MEDIUM").toLowerCase().replace(/[^a-z0-9]/g, "_");
+        const dateStr = inc.updatedAt ? new Date(inc.updatedAt).toLocaleString() : "--";
+        const targets = Array.isArray(inc.affectedTargets) ? inc.affectedTargets : [];
+        const targetsDisplay = targets.length > 0
+          ? `${escapeHtml(targets[0])}${targets.length > 1 ? ` (+${targets.length - 1} more)` : ''}`
+          : "N/A";
+        const alertCount = Array.isArray(inc.associatedAlertIds) ? inc.associatedAlertIds.length : 0;
+
+        return `
+          <tr>
+            <td>
+              <div style="font-weight:600; color:var(--text-main); font-size:13px;">${escapeHtml(inc.title)}</div>
+              <div class="soc-date-cell">${escapeHtml(inc.incidentId)}</div>
+            </td>
+            <td>
+              <span class="incident-status-chip ${statusClass}">${escapeHtml(inc.status)}</span>
+            </td>
+            <td>
+              <span class="priority-chip ${prioClass}">${escapeHtml(inc.severity)}</span>
+            </td>
+            <td>
+              <span class="vector-chip">${escapeHtml(inc.attackVector || "UNKNOWN")}</span>
+            </td>
+            <td>
+              <div class="soc-target-cell" title="${escapeHtml(targets.join(', '))}">${targetsDisplay}</div>
+            </td>
+            <td>
+              <span class="mono" style="font-weight:700;">${alertCount}</span>
+            </td>
+            <td>
+              <span class="soc-date-cell">${escapeHtml(inc.assignedTo || "Unassigned")}</span>
+            </td>
+            <td>
+              <span class="soc-date-cell">${dateStr}</span>
+            </td>
+            <td class="soc-actions-cell">
+              <button class="btn btn-sm btn-primary" onclick="openIncidentModal('${escapeHtml(inc.incidentId)}')">
+                <i data-lucide="shield" class="icon-13"></i>
+                <span>Investigate</span>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+      refreshIcons();
+    }
+
+  } catch (err) {
+    console.error("[SOC Incidents] Fetch error:", err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:20px; color:#EF4444;">Error loading incidents: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+// ================= 4. ALERT DETAILS MODAL =================
+async function openAlertModal(alertId) {
+  if (!alertId) return;
+  const modal = document.getElementById("alertDetailsModal");
+  if (!modal) return;
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/alerts/${encodeURIComponent(alertId)}`);
+    if (!res.ok) throw new Error("Alert not found");
+    const json = await res.json();
+    const alert = json.data;
+    currentActiveAlert = alert;
+
+    document.getElementById("alertModalTitle").innerText = alert.title || "Alert Details";
+    document.getElementById("alertModalId").innerText = alert.alertId || alertId;
+    document.getElementById("alertModalTarget").innerText = alert.target || "--";
+    document.getElementById("alertModalSource").innerText = alert.detectionSource || "STATIC";
+
+    const prioClass = (alert.priority || "P3_MEDIUM").toLowerCase().replace(/[^a-z0-9]/g, "_");
+    document.getElementById("alertModalSeverityBadge").innerHTML = `
+      <span class="priority-chip ${prioClass}">${escapeHtml(alert.severity)} &bull; ${escapeHtml(alert.priority?.replace("_", " "))}</span>
+    `;
+
+    document.getElementById("alertModalScore").innerHTML = `
+      <span class="mono" style="font-weight:700;">${alert.riskScore}/100</span> &bull; 
+      <span style="font-weight:700; color:${alert.verdict === 'MALICIOUS' ? '#EF4444' : alert.verdict === 'SUSPICIOUS' ? '#F59E0B' : '#10B981'}">${escapeHtml(alert.verdict)}</span>
+    `;
+
+    const incLinkBox = document.getElementById("alertModalIncidentLink");
+    if (incLinkBox) {
+      if (alert.incidentId) {
+        incLinkBox.innerHTML = `
+          <button class="btn btn-sm btn-primary" onclick="closeAlertModal(); openIncidentModal('${escapeHtml(alert.incidentId)}')">
+            <i data-lucide="shield-alert" class="icon-14"></i>
+            <span>View Incident ${escapeHtml(alert.incidentId)}</span>
+          </button>
+        `;
+      } else {
+        incLinkBox.innerHTML = `<span class="soc-date-cell">No incident linked &mdash; Standalone Alert</span>`;
+      }
+    }
+
+    const evList = document.getElementById("alertModalEvidenceList");
+    if (evList) {
+      const items = Array.isArray(alert.evidence) ? alert.evidence : [];
+      if (!items.length) {
+        evList.innerHTML = `<div class="soc-date-cell">No specific threat evidence objects stored.</div>`;
+      } else {
+        evList.innerHTML = items.map(e => `
+          <div style="background:#0D1627; border:1px solid var(--border-card); border-radius:6px; padding:10px 12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:600; font-size:12.5px; color:var(--text-main);">${escapeHtml(e.name)}</span>
+              <span class="priority-chip ${e.severity === 'CRITICAL' ? 'p1_critical' : e.severity === 'HIGH' ? 'p2_high' : 'p3_medium'}">${escapeHtml(e.severity)} (+${e.scoreContribution || 0} pts)</span>
+            </div>
+            <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">${escapeHtml(e.explanation || "")}</div>
+            ${e.evidence ? `<pre class="mono" style="background:#080D19; padding:4px 8px; border-radius:4px; font-size:11px; margin-top:6px; color:var(--primary); overflow-x:auto;">${escapeHtml(e.evidence)}</pre>` : ''}
+          </div>
+        `).join("");
+      }
+    }
+
+    // Render analyst notes
+    renderAlertModalNotes(alert.analystNotes || []);
+
+    // Set status select
+    const statusSelect = document.getElementById("alertModalStatusSelect");
+    if (statusSelect) statusSelect.value = alert.status || "NEW";
+
+    modal.classList.add("active");
+    refreshIcons();
+
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Error", text: err.message });
+  }
+}
+
+function renderAlertModalNotes(notes = []) {
+  const box = document.getElementById("alertModalNotesList");
+  if (!box) return;
+
+  if (!notes.length) {
+    box.innerHTML = `<div class="soc-date-cell">No analyst notes recorded yet.</div>`;
+    return;
+  }
+
+  box.innerHTML = notes.map(n => `
+    <div class="timeline-entry">
+      <div class="timeline-entry-header">
+        <span class="timeline-author">${escapeHtml(n.author || "Analyst")}</span>
+        <span class="timeline-time">${n.timestamp ? new Date(n.timestamp).toLocaleTimeString() : ""}</span>
+      </div>
+      <div class="timeline-text">${escapeHtml(n.note || "")}</div>
+    </div>
+  `).join("");
+}
+
+function closeAlertModal() {
+  const modal = document.getElementById("alertDetailsModal");
+  if (modal) modal.classList.remove("active");
+  currentActiveAlert = null;
+}
+
+async function updateCurrentAlertStatus() {
+  if (!currentActiveAlert) return;
+  const select = document.getElementById("alertModalStatusSelect");
+  if (!select) return;
+
+  const newStatus = select.value;
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/alerts/${encodeURIComponent(currentActiveAlert.alertId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: newStatus, author: "SOC Analyst" })
+    });
+    if (!res.ok) throw new Error("Failed to update alert status");
+    const json = await res.json();
+    currentActiveAlert = json.data;
+    fetchSocAlerts(socAlertsCurrentPage);
+    fetchSocAlertStats();
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Update Error", text: err.message });
+  }
+}
+
+async function submitAlertNote() {
+  if (!currentActiveAlert) return;
+  const textInput = document.getElementById("alertNewNoteText");
+  const authorInput = document.getElementById("alertNoteAuthor");
+  const text = textInput ? textInput.value.trim() : "";
+  const author = authorInput ? authorInput.value.trim() : "SOC Analyst";
+
+  if (!text) return;
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/alerts/${encodeURIComponent(currentActiveAlert.alertId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note: text, author })
+    });
+    if (!res.ok) throw new Error("Failed to add note");
+    const json = await res.json();
+    currentActiveAlert = json.data;
+    if (textInput) textInput.value = "";
+    renderAlertModalNotes(currentActiveAlert.analystNotes || []);
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Error", text: err.message });
+  }
+}
+
+async function escalateCurrentAlertToIncident() {
+  if (!currentActiveAlert) return;
+
+  const confirmed = await showSocConfirm({
+    title: "Escalate to Incident",
+    text: `Create a dedicated security incident for alert '${currentActiveAlert.title}'?`,
+    confirmText: "Escalate Now"
+  });
+  if (!confirmed) return;
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/incidents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: `Incident: ${currentActiveAlert.title}`,
+        description: currentActiveAlert.description || `Escalated from alert ${currentActiveAlert.alertId}.`,
+        severity: currentActiveAlert.severity,
+        priority: currentActiveAlert.priority,
+        attackVector: "ANOMALY_UNKNOWN",
+        associatedAlertIds: [currentActiveAlert.alertId],
+        affectedTargets: [currentActiveAlert.target],
+        investigationNotes: [
+          {
+            text: `Incident established manually from alert ${currentActiveAlert.alertId}.`,
+            author: "SOC Analyst",
+            timestamp: new Date()
+          }
+        ]
+      })
+    });
+
+    if (!res.ok) throw new Error("Failed to create incident");
+    const json = await res.json();
+    const newInc = json.data;
+
+    // Link alert to new incident
+    await socFetch(`${API_BASE}/api/soc/alerts/${encodeURIComponent(currentActiveAlert.alertId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        incidentId: newInc.incidentId,
+        status: "ESCALATED_TO_INCIDENT"
+      })
+    });
+
+    closeAlertModal();
+    fetchSocAlerts(socAlertsCurrentPage);
+    fetchSocAlertStats();
+    fetchSocIncidents(1);
+    fetchSocIncidentStats();
+    openIncidentModal(newInc.incidentId);
+
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Escalation Error", text: err.message });
+  }
+}
+
+// ================= 5. INCIDENT INVESTIGATION MODAL =================
+async function openIncidentModal(incidentId) {
+  if (!incidentId) return;
+  const modal = document.getElementById("incidentInvestigationModal");
+  if (!modal) return;
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/incidents/${encodeURIComponent(incidentId)}`);
+    if (!res.ok) throw new Error("Incident not found");
+    const json = await res.json();
+    const incident = json.data;
+    currentActiveIncident = incident;
+
+    document.getElementById("incidentModalTitle").innerText = incident.title || "Incident Investigation";
+    document.getElementById("incidentModalId").innerText = incident.incidentId || incidentId;
+
+    const statusClass = (incident.status || "OPEN").toLowerCase();
+    const prioClass = (incident.priority || "P3_MEDIUM").toLowerCase().replace(/[^a-z0-9]/g, "_");
+    document.getElementById("incidentModalStatusBadges").innerHTML = `
+      <span class="incident-status-chip ${statusClass}">${escapeHtml(incident.status)}</span>
+      <span class="priority-chip ${prioClass}">${escapeHtml(incident.severity)} &bull; ${escapeHtml(incident.priority?.replace("_", " "))}</span>
+    `;
+
+    document.getElementById("incidentModalVector").innerText = incident.attackVector || "ANOMALY_UNKNOWN";
+    document.getElementById("incidentModalAssignee").innerText = incident.assignedTo || "Unassigned";
+
+    // Targets list
+    const targets = Array.isArray(incident.affectedTargets) ? incident.affectedTargets : [];
+    document.getElementById("incidentModalTargetCount").innerText = targets.length;
+    const targetsBox = document.getElementById("incidentModalTargetsList");
+    if (targetsBox) {
+      targetsBox.innerHTML = targets.length > 0
+        ? targets.map(t => `<div class="soc-target-cell"><i data-lucide="globe" class="icon-12"></i> ${escapeHtml(t)}</div>`).join("")
+        : `<div class="soc-date-cell">No affected targets recorded.</div>`;
+    }
+
+    // Exfiltration list
+    const exfils = Array.isArray(incident.exfiltrationEndpoints) ? incident.exfiltrationEndpoints : [];
+    const exfilBox = document.getElementById("incidentModalExfilList");
+    if (exfilBox) {
+      exfilBox.innerHTML = exfils.length > 0
+        ? exfils.map(e => `<div class="mono" style="font-size:11.5px; color:#EF4444;"><i data-lucide="radio" class="icon-12"></i> ${escapeHtml(e)}</div>`).join("")
+        : `<div class="soc-date-cell">None observed.</div>`;
+    }
+
+    // Remediation steps
+    const rem = incident.remediation || {};
+    document.getElementById("incidentRemediationSummary").innerText = rem.summary || "Review affected infrastructure and verify indicator containment.";
+    const stepsBox = document.getElementById("incidentRemediationSteps");
+    if (stepsBox) {
+      const steps = Array.isArray(rem.steps) ? rem.steps : [];
+      stepsBox.innerHTML = steps.map(s => `
+        <div class="remediation-step-item">
+          <i data-lucide="check-square" class="icon-14"></i>
+          <span>${escapeHtml(s)}</span>
+        </div>
+      `).join("");
+    }
+
+    // Associated alerts
+    const alerts = Array.isArray(incident.associatedAlertIds) ? incident.associatedAlertIds : [];
+    document.getElementById("incidentModalAlertCount").innerText = alerts.length;
+    const alertsBox = document.getElementById("incidentModalAlertsList");
+    if (alertsBox) {
+      alertsBox.innerHTML = alerts.length > 0
+        ? alerts.map(id => `
+          <div style="display:flex; align-items:center; justify-content:space-between; background:#080D19; padding:6px 10px; border-radius:5px;">
+            <span class="mono" style="font-size:12px; color:var(--primary);">${escapeHtml(id)}</span>
+            <button class="btn btn-sm btn-outline" style="padding:2px 6px; font-size:11px;" onclick="closeIncidentModal(); openAlertModal('${escapeHtml(id)}')">
+              <i data-lucide="eye" class="icon-12"></i> View Alert
+            </button>
+          </div>
+        `).join("")
+        : `<div class="soc-date-cell">No correlated alerts.</div>`;
+    }
+
+    // Render interactive investigation notes timeline
+    renderIncidentNotesTimeline(incident.investigationNotes || []);
+
+    // Set status select
+    const statusSelect = document.getElementById("incidentModalStatusSelect");
+    if (statusSelect) statusSelect.value = incident.status || "OPEN";
+
+    modal.classList.add("active");
+    refreshIcons();
+
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Error", text: err.message });
+  }
+}
+
+function renderIncidentNotesTimeline(notes = []) {
+  const box = document.getElementById("incidentNotesTimeline");
+  if (!box) return;
+
+  if (!notes.length) {
+    box.innerHTML = `<div class="soc-date-cell">No investigation notes recorded yet.</div>`;
+    return;
+  }
+
+  box.innerHTML = notes.map(n => {
+    const isAuto = (n.author || "").toLowerCase().includes("automation") || (n.author || "").toLowerCase().includes("correlation");
+    return `
+      <div class="timeline-entry ${isAuto ? 'automated' : ''}">
+        <div class="timeline-entry-header">
+          <span class="timeline-author">${escapeHtml(n.author || "Analyst")}</span>
+          <span class="timeline-time">${n.timestamp ? new Date(n.timestamp).toLocaleString() : ""}</span>
+        </div>
+        <div class="timeline-text">${escapeHtml(n.text || "")}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function closeIncidentModal() {
+  const modal = document.getElementById("incidentInvestigationModal");
+  if (modal) modal.classList.remove("active");
+  currentActiveIncident = null;
+}
+
+async function updateCurrentIncidentStatus() {
+  if (!currentActiveIncident) return;
+  const select = document.getElementById("incidentModalStatusSelect");
+  if (!select) return;
+
+  const newStatus = select.value;
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/incidents/${encodeURIComponent(currentActiveIncident.incidentId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: newStatus, author: "SOC Analyst" })
+    });
+    if (!res.ok) throw new Error("Failed to update incident status");
+    const json = await res.json();
+    currentActiveIncident = json.data;
+    fetchSocIncidents(socIncidentsCurrentPage);
+    fetchSocIncidentStats();
+    openIncidentModal(currentActiveIncident.incidentId);
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Update Error", text: err.message });
+  }
+}
+
+async function submitIncidentNote() {
+  if (!currentActiveIncident) return;
+  const textInput = document.getElementById("incidentNewNoteText");
+  const authorInput = document.getElementById("incidentNoteAuthor");
+  const text = textInput ? textInput.value.trim() : "";
+  const author = authorInput ? authorInput.value.trim() : "SOC Analyst";
+
+  if (!text) return;
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/incidents/${encodeURIComponent(currentActiveIncident.incidentId)}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, author })
+    });
+    if (!res.ok) throw new Error("Failed to add note");
+    const json = await res.json();
+    currentActiveIncident = json.data;
+    if (textInput) textInput.value = "";
+    renderIncidentNotesTimeline(currentActiveIncident.investigationNotes || []);
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Note Submission Error", text: err.message });
+  }
+}
+
+// ================= 6. CREATE INCIDENT MODAL =================
+function openCreateIncidentModal() {
+  const modal = document.getElementById("createIncidentModal");
+  if (modal) modal.classList.add("active");
+}
+
+function closeCreateIncidentModal() {
+  const modal = document.getElementById("createIncidentModal");
+  if (modal) modal.classList.remove("active");
+}
+
+async function submitCreateIncident() {
+  const title = document.getElementById("newIncidentTitle")?.value.trim() || "";
+  const severity = document.getElementById("newIncidentSeverity")?.value || "HIGH";
+  const priority = document.getElementById("newIncidentPriority")?.value || "P2_HIGH";
+  const attackVector = document.getElementById("newIncidentVector")?.value || "ANOMALY_UNKNOWN";
+  const assignee = document.getElementById("newIncidentAssignee")?.value.trim() || "Unassigned";
+  const targetsRaw = document.getElementById("newIncidentTargets")?.value.trim() || "";
+  const initialNote = document.getElementById("newIncidentInitialNote")?.value.trim() || "";
+
+  if (!title) {
+    showSocAlert({ icon: "warning", title: "Title Required", text: "Please enter an incident title." });
+    return;
+  }
+
+  const affectedTargets = targetsRaw
+    ? targetsRaw.split(",").map(t => t.trim()).filter(Boolean)
+    : [];
+
+  const payload = {
+    title,
+    severity,
+    priority,
+    attackVector,
+    assignedTo: assignee,
+    affectedTargets,
+    investigationNotes: initialNote ? [{ text: initialNote, author: assignee, timestamp: new Date() }] : []
+  };
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/incidents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json();
+      throw new Error(errJson.error || "Failed to create incident");
+    }
+
+    closeCreateIncidentModal();
+    fetchSocIncidents(1);
+    fetchSocIncidentStats();
+    showSocAlert({ icon: "success", title: "Incident Created", text: "Security incident established successfully." });
+
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Creation Error", text: err.message });
+  }
+}
+
+// ==========================================================================
+// PHASE 2.5: AUTHENTICATION, RBAC, CSRF, SESSION EXPIRY & AUDIT CONSOLE
+// ==========================================================================
+
+let socCurrentUser = null;
+let socCsrfToken = null;
+let socSessionExpiresAt = null;
+let socSessionExpiryTimer = null;
+
+let socAuditCurrentPage = 1;
+let socAuditTotalPages = 1;
+let auditSearchDebounce = null;
+
+/**
+ * Authenticated fetch wrapper:
+ * - Sends HttpOnly session cookies (same-origin / include)
+ * - Automatically attaches X-CSRF-Token header on state-changing HTTP verbs
+ * - Intercepts 401 (Session Expired / Auth Required) and opens Login Gate
+ * - Intercepts 403 (RBAC Forbidden / CSRF) and notifies analyst
+ */
+async function socFetch(url, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
+  const headers = { ...(options.headers || {}) };
+
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && socCsrfToken) {
+    headers["X-CSRF-Token"] = socCsrfToken;
+  }
+
+  const fetchOpts = {
+    ...options,
+    method,
+    headers,
+    credentials: API_BASE ? "include" : "same-origin"
+  };
+
+  const res = await fetch(url, fetchOpts);
+
+  if (res.status === 401) {
+    let payload = {};
+    try { payload = await res.clone().json(); } catch (_) {}
+    handleSessionExpired(payload.code === "SESSION_EXPIRED");
+    return res;
+  }
+
+  if (res.status === 403) {
+    let payload = {};
+    try { payload = await res.clone().json(); } catch (_) {}
+    if (payload.code === "FORBIDDEN" || payload.code === "CSRF_INVALID" || payload.code === "AUDIT_IMMUTABLE") {
+      showSocAlert({
+        icon: "error",
+        title: "Access Denied (403)",
+        text: payload.error || "Your role does not permit this operation."
+      });
+    }
+  }
+
+  return res;
+}
+
+function showAuthGateNotice(message, type = "error") {
+  const box = document.getElementById("authGateNotice");
+  if (!box) return;
+  if (!message) {
+    box.style.display = "none";
+    box.innerText = "";
+    return;
+  }
+  box.className = `auth-notice ${type}`;
+  box.innerText = message;
+  box.style.display = "block";
+}
+
+function openAuthGate({ showSetup = false, notice = "", noticeType = "error" } = {}) {
+  const overlay = document.getElementById("authGateOverlay");
+  const loginForm = document.getElementById("socLoginForm");
+  const setupForm = document.getElementById("socSetupForm");
+  const subtitle = document.getElementById("authGateSubtitle");
+
+  if (loginForm) loginForm.style.display = showSetup ? "none" : "flex";
+  if (setupForm) setupForm.style.display = showSetup ? "flex" : "none";
+  if (subtitle) {
+    subtitle.innerText = showSetup
+      ? "First-run security initialization required"
+      : "Authenticate to access Security Operations telemetry";
+  }
+
+  showAuthGateNotice(notice, noticeType);
+  if (overlay) overlay.classList.add("active");
+  refreshIcons();
+}
+
+function closeAuthGate() {
+  const overlay = document.getElementById("authGateOverlay");
+  if (overlay) overlay.classList.remove("active");
+  showAuthGateNotice("");
+}
+
+function handleSessionExpired(wasExpired = true) {
+  const hadSession = Boolean(socCurrentUser);
+  socCurrentUser = null;
+  socCsrfToken = null;
+  socSessionExpiresAt = null;
+  if (socSessionExpiryTimer) {
+    clearInterval(socSessionExpiryTimer);
+    socSessionExpiryTimer = null;
+  }
+
+  const userCard = document.getElementById("sidebarUserCard");
+  if (userCard) userCard.style.display = "none";
+
+  closeAlertModal();
+  closeIncidentModal();
+  closeCreateIncidentModal();
+  closeCreateUserModal();
+
+  if (hadSession || wasExpired) {
+    openAuthGate({
+      showSetup: false,
+      notice: wasExpired
+        ? "Your SOC session has expired for security. Please sign in again."
+        : "Authentication is required to continue.",
+      noticeType: "warning"
+    });
+  } else {
+    openAuthGate({ showSetup: false });
+  }
+}
+
+function startSessionExpiryMonitor() {
+  if (socSessionExpiryTimer) clearInterval(socSessionExpiryTimer);
+  socSessionExpiryTimer = setInterval(() => {
+    if (!socSessionExpiresAt || !socCurrentUser) return;
+    if (Date.now() >= new Date(socSessionExpiresAt).getTime()) {
+      handleSessionExpired(true);
+    }
+  }, 15000);
+}
+
+/**
+ * Applies role-based UI visibility and read-only states for VIEWER accounts.
+ * Backend RBAC remains the authoritative security enforcement boundary.
+ */
+function applyRbacUiVisibility() {
+  const role = socCurrentUser?.role || "VIEWER";
+  const canMutate = role === "ADMIN" || role === "ANALYST";
+
+  // 1. Show/hide role-tagged navigation & action elements
+  document.querySelectorAll("[data-roles]").forEach(el => {
+    const allowed = (el.getAttribute("data-roles") || "").split(",").map(r => r.trim().toUpperCase());
+    el.style.display = allowed.includes(role) ? "" : "none";
+  });
+
+  // 2. Render authenticated sidebar profile card
+  const userCard = document.getElementById("sidebarUserCard");
+  const avatarEl = document.getElementById("sidebarUserAvatar");
+  const nameEl = document.getElementById("sidebarUserName");
+  const roleEl = document.getElementById("sidebarUserRole");
+
+  if (userCard && socCurrentUser) {
+    userCard.style.display = "flex";
+    const display = socCurrentUser.displayName || socCurrentUser.username;
+    if (avatarEl) avatarEl.innerText = display.charAt(0).toUpperCase();
+    if (nameEl) nameEl.innerText = display;
+    if (roleEl) {
+      roleEl.innerText = role;
+      roleEl.className = `role-badge ${role.toLowerCase()}`;
+    }
+  }
+
+  // 3. Disable mutating alert/incident UI controls for VIEWER role
+  const mutatingSelectors = [
+    "#alertModalStatusSelect",
+    "#alertEscalateBtn",
+    "#alertNewNoteText",
+    "#incidentModalStatusSelect",
+    "#incidentNewNoteText",
+    "button[onclick='openCreateIncidentModal()']",
+    "button[onclick='submitAlertNote()']",
+    "button[onclick='submitIncidentNote()']"
+  ];
+
+  mutatingSelectors.forEach(sel => {
+    const el = document.querySelector(sel);
+    if (el) {
+      el.disabled = !canMutate;
+      el.title = canMutate ? "" : "Read-only VIEWER role cannot modify SOC records";
+      el.style.opacity = canMutate ? "" : "0.5";
+      el.style.cursor = canMutate ? "" : "not-allowed";
+    }
+  });
+
+  // Lock note author fields to authenticated username (backend also enforces this)
+  const alertAuthor = document.getElementById("alertNoteAuthor");
+  const incAuthor = document.getElementById("incidentNoteAuthor");
+  if (alertAuthor && socCurrentUser) {
+    alertAuthor.value = socCurrentUser.username;
+    alertAuthor.readOnly = true;
+  }
+  if (incAuthor && socCurrentUser) {
+    incAuthor.value = socCurrentUser.username;
+    incAuthor.readOnly = true;
+  }
+}
+
+/**
+ * Bootstraps authentication state on initial page load
+ */
+async function initSocAuthGate() {
+  try {
+    const meRes = await fetch(`${API_BASE}/api/auth/me`, {
+      credentials: API_BASE ? "include" : "same-origin"
+    });
+
+    if (meRes.ok) {
+      const json = await meRes.json();
+      if (json.success && json.data?.user) {
+        onAuthSuccess(json.data);
+        return;
+      }
+    }
+
+    // Check if first-run admin setup is required
+    const statusRes = await fetch(`${API_BASE}/api/auth/status`, {
+      credentials: API_BASE ? "include" : "same-origin"
+    });
+    const statusJson = statusRes.ok ? await statusRes.json() : {};
+    const setupRequired = Boolean(statusJson.data?.setupRequired);
+
+    openAuthGate({ showSetup: setupRequired });
+  } catch (err) {
+    openAuthGate({
+      showSetup: false,
+      notice: "Could not contact authentication service. Verify server connectivity.",
+      noticeType: "error"
+    });
+  }
+}
+
+function onAuthSuccess(authData) {
+  socCurrentUser = authData.user;
+  socCsrfToken = authData.csrfToken || null;
+  socSessionExpiresAt = authData.expiresAt || null;
+
+  closeAuthGate();
+  applyRbacUiVisibility();
+  startSessionExpiryMonitor();
+
+  const targetView = window.__pendingInitialView || "dashboard";
+  window.__pendingInitialView = null;
+  switchView(targetView, false);
+  refreshAllDashboardData();
+}
+
+async function handleSocLogin(event) {
+  event.preventDefault();
+  const username = document.getElementById("loginUsername")?.value.trim() || "";
+  const password = document.getElementById("loginPassword")?.value || "";
+  const btn = document.getElementById("loginSubmitBtn");
+
+  if (!username || !password) {
+    showAuthGateNotice("Username and password are required.", "error");
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  showAuthGateNotice("");
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: API_BASE ? "include" : "same-origin",
+      body: JSON.stringify({ username, password })
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      showAuthGateNotice(json.error || "Authentication failed.", res.status === 423 || res.status === 429 ? "warning" : "error");
+      return;
+    }
+
+    const pwEl = document.getElementById("loginPassword");
+    if (pwEl) pwEl.value = "";
+    onAuthSuccess(json.data);
+  } catch (err) {
+    showAuthGateNotice("Network error while signing in.", "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function handleSocInitialSetup(event) {
+  event.preventDefault();
+  const username = document.getElementById("setupUsername")?.value.trim() || "";
+  const email = document.getElementById("setupEmail")?.value.trim() || "";
+  const password = document.getElementById("setupPassword")?.value || "";
+  const btn = document.getElementById("setupSubmitBtn");
+
+  if (btn) btn.disabled = true;
+  showAuthGateNotice("");
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: API_BASE ? "include" : "same-origin",
+      body: JSON.stringify({ username, email, password, displayName: "Primary SOC Administrator" })
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      showAuthGateNotice(json.error || "Initial setup failed.", "error");
+      return;
+    }
+
+    const pwEl = document.getElementById("setupPassword");
+    if (pwEl) pwEl.value = "";
+    const loginUserEl = document.getElementById("loginUsername");
+    if (loginUserEl) loginUserEl.value = username;
+
+    openAuthGate({
+      showSetup: false,
+      notice: "Primary ADMIN account provisioned successfully. Sign in with your new credentials.",
+      noticeType: "success"
+    });
+  } catch (err) {
+    showAuthGateNotice("Network error during initial setup.", "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function handleSocLogout() {
+  try {
+    await socFetch(`${API_BASE}/api/auth/logout`, { method: "POST" });
+  } catch (_) {}
+
+  socCurrentUser = null;
+  socCsrfToken = null;
+  socSessionExpiresAt = null;
+  if (socSessionExpiryTimer) {
+    clearInterval(socSessionExpiryTimer);
+    socSessionExpiryTimer = null;
+  }
+
+  const userCard = document.getElementById("sidebarUserCard");
+  if (userCard) userCard.style.display = "none";
+
+  openAuthGate({
+    showSetup: false,
+    notice: "You have signed out cleanly. Session invalidated.",
+    noticeType: "success"
+  });
+}
+
+// ================= IMMUTABLE AUDIT LOG CONSOLE =================
+function handleAuditSearch() {
+  clearTimeout(auditSearchDebounce);
+  auditSearchDebounce = setTimeout(() => fetchSocAuditLogs(1), 300);
+}
+
+function changeAuditPage(delta) {
+  const next = socAuditCurrentPage + delta;
+  if (next >= 1 && next <= socAuditTotalPages) {
+    fetchSocAuditLogs(next);
+  }
+}
+
+async function fetchSocAuditLogs(page = 1) {
+  if (!socCurrentUser) return;
+  socAuditCurrentPage = page;
+
+  const tbody = document.getElementById("auditTableBody");
+  const emptyState = document.getElementById("auditEmptyState");
+  const pageInfo = document.getElementById("auditPaginationInfo");
+  const prevBtn = document.getElementById("auditPrevBtn");
+  const nextBtn = document.getElementById("auditNextBtn");
+
+  const username = document.getElementById("auditActorFilter")?.value.trim() || "";
+  const entityType = document.getElementById("auditEntityFilter")?.value || "";
+  const outcome = document.getElementById("auditOutcomeFilter")?.value || "";
+
+  const params = new URLSearchParams({ page: String(page), limit: "20" });
+  if (username) params.append("username", username);
+  if (entityType) params.append("entityType", entityType);
+  if (outcome) params.append("outcome", outcome);
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/audit?${params.toString()}`);
+    if (!res || !res.ok) return;
+    const json = await res.json();
+    const logs = json.data || [];
+    const pag = json.pagination || { totalPages: 1, total: 0 };
+    socAuditTotalPages = pag.totalPages || 1;
+
+    if (pageInfo) pageInfo.innerText = `Page ${page} of ${socAuditTotalPages} (${pag.total} audit events)`;
+    if (prevBtn) prevBtn.disabled = page <= 1;
+    if (nextBtn) nextBtn.disabled = page >= socAuditTotalPages;
+
+    if (!logs.length) {
+      if (tbody) tbody.innerHTML = "";
+      if (emptyState) emptyState.style.display = "block";
+      return;
+    }
+
+    if (emptyState) emptyState.style.display = "none";
+    if (tbody) {
+      tbody.innerHTML = logs.map(rec => {
+        const ts = rec.timestamp ? new Date(rec.timestamp).toLocaleString() : "--";
+        const roleClass = (rec.actor?.role || "viewer").toLowerCase();
+        const outcomeClass = (rec.outcome || "success").toLowerCase();
+        const hashShort = rec.integrityHash ? `${rec.integrityHash.slice(0, 12)}...` : "--";
+
+        return `
+          <tr>
+            <td class="soc-date-cell">${escapeHtml(ts)}</td>
+            <td>
+              <div style="font-weight:600; font-size:12.5px;">${escapeHtml(rec.actor?.username || "system")}</div>
+              <span class="role-badge ${escapeHtml(roleClass)}">${escapeHtml(rec.actor?.role || "SYSTEM")}</span>
+            </td>
+            <td><span class="vector-chip">${escapeHtml(rec.action)}</span></td>
+            <td>
+              <div style="font-size:12px; color:var(--text-main);">${escapeHtml(rec.entityType)}</div>
+              <div class="soc-date-cell">${escapeHtml(rec.entityId || "--")}</div>
+            </td>
+            <td><span class="audit-outcome ${escapeHtml(outcomeClass)}">${escapeHtml(rec.outcome)}</span></td>
+            <td style="font-size:12px; color:var(--text-secondary); max-width:300px;">${escapeHtml(rec.details || "")}</td>
+            <td class="mono soc-date-cell" title="${escapeHtml(rec.integrityHash || "")}">${escapeHtml(hashShort)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+  } catch (err) {
+    console.warn("[Audit Console] Fetch error:", err.message);
+  }
+}
+
+async function verifySocAuditChain() {
+  try {
+    const res = await socFetch(`${API_BASE}/api/soc/audit/verify`);
+    if (!res || !res.ok) return;
+    const json = await res.json();
+    const report = json.data || {};
+
+    showSocAlert({
+      icon: report.verified ? "success" : "error",
+      title: report.verified ? "Audit Chain Integrity Verified" : "Integrity Violation Detected",
+      text: report.verified
+        ? `All ${report.totalRecords} immutable audit records verified with intact SHA-256 cryptographic hash chain.`
+        : `${report.tamperedRecords?.length || 0} record(s) failed integrity verification.`
+    });
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Verification Error", text: err.message });
+  }
+}
+
+// ================= ADMIN USER & RBAC MANAGEMENT CONSOLE =================
+async function fetchSocUsers() {
+  if (!socCurrentUser || socCurrentUser.role !== "ADMIN") return;
+  const tbody = document.getElementById("usersTableBody");
+  if (!tbody) return;
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/auth/users`);
+    if (!res || !res.ok) return;
+    const json = await res.json();
+    const users = json.data || [];
+
+    tbody.innerHTML = users.map(u => {
+      const isSelf = u.userId === socCurrentUser.userId;
+      const isLocked = u.lockUntil && new Date(u.lockUntil).getTime() > Date.now();
+      const lastLogin = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "Never";
+
+      return `
+        <tr>
+          <td>
+            <div style="font-weight:600; color:var(--text-main);">${escapeHtml(u.username)} ${isSelf ? '<span class="soc-date-cell">(You)</span>' : ''}</div>
+            <div class="soc-date-cell">${escapeHtml(u.displayName || "")}</div>
+          </td>
+          <td class="soc-date-cell">${escapeHtml(u.email)}</td>
+          <td>
+            <select class="soc-select-filter" ${isSelf ? "disabled" : ""} onchange="updateSocUserRole('${escapeHtml(u.userId)}', this.value)">
+              <option value="ADMIN" ${u.role === "ADMIN" ? "selected" : ""}>ADMIN</option>
+              <option value="ANALYST" ${u.role === "ANALYST" ? "selected" : ""}>ANALYST</option>
+              <option value="VIEWER" ${u.role === "VIEWER" ? "selected" : ""}>VIEWER</option>
+            </select>
+          </td>
+          <td>
+            ${isLocked
+              ? `<span class="audit-outcome denied">LOCKED</span>`
+              : u.active
+                ? `<span class="audit-outcome success">ACTIVE</span>`
+                : `<span class="audit-outcome failure">DISABLED</span>`}
+          </td>
+          <td class="soc-date-cell">${escapeHtml(lastLogin)}</td>
+          <td class="soc-actions-cell">
+            ${isLocked ? `<button class="btn btn-sm btn-outline" onclick="unlockSocUser('${escapeHtml(u.userId)}')">Unlock</button>` : ""}
+            <button class="btn btn-sm btn-outline" ${isSelf ? "disabled" : ""} onclick="toggleSocUserActive('${escapeHtml(u.userId)}', ${!u.active})">
+              ${u.active ? "Disable" : "Enable"}
+            </button>
+            <button class="btn btn-sm btn-secondary" ${isSelf ? "disabled" : ""} onclick="deleteSocUser('${escapeHtml(u.userId)}', '${escapeHtml(u.username)}')">
+              Delete
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+    refreshIcons();
+  } catch (err) {
+    console.warn("[Users Console] Fetch error:", err.message);
+  }
+}
+
+function openCreateUserModal() {
+  const modal = document.getElementById("createUserModal");
+  if (modal) modal.classList.add("active");
+}
+
+function closeCreateUserModal() {
+  const modal = document.getElementById("createUserModal");
+  if (modal) modal.classList.remove("active");
+}
+
+async function submitCreateUser() {
+  const username = document.getElementById("newUserUsername")?.value.trim() || "";
+  const email = document.getElementById("newUserEmail")?.value.trim() || "";
+  const displayName = document.getElementById("newUserDisplayName")?.value.trim() || "";
+  const role = document.getElementById("newUserRole")?.value || "ANALYST";
+  const password = document.getElementById("newUserPassword")?.value || "";
+
+  try {
+    const res = await socFetch(`${API_BASE}/api/auth/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, email, displayName, role, password })
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      showSocAlert({ icon: "error", title: "Provisioning Failed", text: json.error || "Could not create user." });
+      return;
+    }
+
+    document.getElementById("newUserUsername").value = "";
+    document.getElementById("newUserEmail").value = "";
+    document.getElementById("newUserDisplayName").value = "";
+    document.getElementById("newUserPassword").value = "";
+    closeCreateUserModal();
+    fetchSocUsers();
+    showSocAlert({ icon: "success", title: "User Provisioned", text: `Account '${username}' created with role ${role}.` });
+  } catch (err) {
+    showSocAlert({ icon: "error", title: "Error", text: err.message });
+  }
+}
+
+async function updateSocUserRole(userId, newRole) {
+  const res = await socFetch(`${API_BASE}/api/auth/users/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role: newRole })
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    showSocAlert({ icon: "error", title: "Role Update Failed", text: json.error || "Failed to update role." });
+  }
+  fetchSocUsers();
+}
+
+async function toggleSocUserActive(userId, active) {
+  const res = await socFetch(`${API_BASE}/api/auth/users/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ active })
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    showSocAlert({ icon: "error", title: "Update Failed", text: json.error || "Failed to change status." });
+  }
+  fetchSocUsers();
+}
+
+async function unlockSocUser(userId) {
+  const res = await socFetch(`${API_BASE}/api/auth/users/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unlock: true })
+  });
+  if (res.ok) fetchSocUsers();
+}
+
+async function deleteSocUser(userId, username) {
+  const confirmed = await showSocConfirm({
+    title: "Delete User Account",
+    text: `Permanently delete '${username}' and revoke all active sessions?`,
+    confirmText: "Delete User"
+  });
+  if (!confirmed) return;
+
+  const res = await socFetch(`${API_BASE}/api/auth/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE"
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    showSocAlert({ icon: "error", title: "Deletion Failed", text: json.error || "Could not delete user." });
+  }
+  fetchSocUsers();
+}
+
+

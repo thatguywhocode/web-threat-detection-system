@@ -335,6 +335,22 @@ async function runTests() {
   /* ================= 6. REST API INTEGRATION TESTS ================= */
   console.log("\n--- 6. REST API Endpoint Integration Tests (In-Process) ---");
 
+  // Authenticate an ANALYST session for protected /api/soc/* endpoints (Phase 2.5 RBAC)
+  const { createUser, login, memoryUserStore, memorySessionStore } = require("../src/soc/auth");
+  await memoryUserStore.deleteMany({});
+  await memorySessionStore.deleteMany({});
+  await createUser({
+    username: "soc_events_tester",
+    email: "events.tester@secunexis.test",
+    password: "EventsTest!Pass987",
+    role: "ANALYST"
+  });
+  const authSession = await login({ username: "soc_events_tester", password: "EventsTest!Pass987" });
+  const authHeaders = {
+    cookie: `secunexis_sid=${authSession.rawToken}`,
+    "x-csrf-token": authSession.csrfToken
+  };
+
   await testAsync("GET / responds with API running health status", async () => {
     const res = await invokeApp(app, "GET", "/");
     assert.strictEqual(res.status, 200);
@@ -342,7 +358,7 @@ async function runTests() {
   });
 
   await testAsync("GET /api/soc/events returns 200 with paginated JSON structure", async () => {
-    const res = await invokeApp(app, "GET", "/api/soc/events?limit=5");
+    const res = await invokeApp(app, "GET", "/api/soc/events?limit=5", { headers: authHeaders });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.data.success, true);
     assert(typeof res.data.total === "number");
@@ -350,7 +366,7 @@ async function runTests() {
   });
 
   await testAsync("GET /api/soc/events/stats returns telemetry breakdown", async () => {
-    const res = await invokeApp(app, "GET", "/api/soc/events/stats");
+    const res = await invokeApp(app, "GET", "/api/soc/events/stats", { headers: authHeaders });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.data.success, true);
     assert(res.data.stats.byVerdict);
@@ -358,11 +374,11 @@ async function runTests() {
   });
 
   await testAsync("GET /api/soc/events/:id retrieves single event document", async () => {
-    const listRes = await invokeApp(app, "GET", "/api/soc/events?limit=1");
+    const listRes = await invokeApp(app, "GET", "/api/soc/events?limit=1", { headers: authHeaders });
     assert(listRes.data.events.length > 0);
     const eventId = listRes.data.events[0].eventId;
 
-    const singleRes = await invokeApp(app, "GET", `/api/soc/events/${eventId}`);
+    const singleRes = await invokeApp(app, "GET", `/api/soc/events/${eventId}`, { headers: authHeaders });
     assert.strictEqual(singleRes.status, 200);
     assert.strictEqual(singleRes.data.success, true);
     assert.strictEqual(singleRes.data.event.eventId, eventId);
@@ -389,7 +405,7 @@ async function runTests() {
     assert.strictEqual(res.data.risk.severity, "LOW");
 
     // Verify that scan automatically created a SOC event
-    const socRes = await invokeApp(app, "GET", "/api/soc/events?sort=newest&limit=1");
+    const socRes = await invokeApp(app, "GET", "/api/soc/events?sort=newest&limit=1", { headers: authHeaders });
     assert(socRes.data.events.length > 0);
     assert.strictEqual(socRes.data.events[0].verdict, "SAFE");
   });
@@ -440,7 +456,7 @@ async function runTests() {
   });
 
   await testAsync("API endpoints return standard rate limiting headers", async () => {
-    const res = await invokeApp(app, "GET", "/api/soc/events?limit=1");
+    const res = await invokeApp(app, "GET", "/api/soc/events?limit=1", { headers: authHeaders });
     assert.strictEqual(res.status, 200);
     assert(res.headers["x-ratelimit-limit"], "Must include X-RateLimit-Limit header");
     assert(res.headers["x-ratelimit-remaining"] !== undefined, "Must include X-RateLimit-Remaining header");

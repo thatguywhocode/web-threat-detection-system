@@ -306,37 +306,10 @@ class MemorySecurityEventStore {
 const memoryStore = new MemorySecurityEventStore();
 
 /* ================= 4. UNIFIED DUAL-MODE CONNECTION MANAGER ================= */
-let isConnectedToMongo = false;
-let connectionAttempted = false;
-
-async function initDb(uri = process.env.MONGODB_URI) {
-  if (isConnectedToMongo && mongoose.connection.readyState === 1) return true;
-  if (!uri && !process.env.MONGODB_URI) {
-    return false;
-  }
-
-  try {
-    const targetUri = uri || process.env.MONGODB_URI;
-    await mongoose.connect(targetUri, {
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 5000,
-      maxPoolSize: 10,
-      socketTimeoutMS: 45000
-    });
-    isConnectedToMongo = true;
-    connectionAttempted = true;
-    console.log("Connected to MongoDB Atlas for SOC Event Management.");
-    return true;
-  } catch (err) {
-    isConnectedToMongo = false;
-    connectionAttempted = true;
-    console.warn("MongoDB Atlas unavailable; falling back to in-memory SOC event store:", err.message);
-    return false;
-  }
-}
+const { initDb, disconnectDb, isMongoConnected, getDbHealth } = require("../db/connectionManager");
 
 function getActiveModel() {
-  if (isConnectedToMongo && mongoose.connection.readyState === 1) {
+  if (isMongoConnected()) {
     return MongooseSecurityEvent;
   }
   return memoryStore;
@@ -346,7 +319,9 @@ module.exports = {
   SecurityEventSchema,
   MongooseSecurityEvent,
   initDb,
-  isMongoConnected: () => isConnectedToMongo,
+  disconnectDb,
+  isMongoConnected,
+  getDbHealth,
   getSecurityEventModel: getActiveModel,
   memoryStore
 };

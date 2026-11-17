@@ -230,3 +230,30 @@ npm start
 ### Free Tier Inactivity (Spin-down)
 - **Symptom**: The first request after 15 minutes of inactivity takes 30-50 seconds.
 - **Explanation**: Render Free Web Services spin down when idle. The service automatically spins up on the next incoming HTTP request. For 24/7 instant response, upgrade the service to Render's *Starter* plan (\$7/mo) or use a free monitoring uptime checker (e.g. UptimeRobot) pinging `https://<app>.onrender.com/health` every 10 minutes.
+
+---
+
+## 9. Phase 2.5 Production Security & Hardening (Render)
+
+Before exposing the SOC Operations Console publicly on Render, configure the following production security environment variables in **Render Dashboard &rarr; Environment**:
+
+| Variable | Recommended Value | Purpose |
+| :--- | :--- | :--- |
+| `NODE_ENV` | `production` | Enables `Secure` cookies, HSTS header, and suppresses detailed error responses. |
+| `MONGODB_URI` | `mongodb+srv://...` | Required for persistent users, sessions, events, alerts, incidents, and immutable audit logs across Render restarts. |
+| `REQUIRE_MONGODB` | `true` | Fails closed on startup if MongoDB Atlas is unreachable (prevents silent fallback to ephemeral memory in production). |
+| `INITIAL_ADMIN_USERNAME` | *(your admin username)* | Provisions the initial `ADMIN` account on first boot (only if 0 users exist). Remove after initial bootstrap. |
+| `INITIAL_ADMIN_EMAIL` | *(your admin email)* | Primary admin email for first-boot provisioning. |
+| `INITIAL_ADMIN_PASSWORD` | *(strong 14+ char secret)* | Meets complexity rules (upper, lower, digit, symbol). **Never commit to Git.** Remove after bootstrap. |
+| `BCRYPT_ROUNDS` | `12` | Password hashing cost factor (minimum 10 enforced). |
+| `SESSION_TTL_MS` | `28800000` | Session expiration duration (8 hours). |
+| `COOKIE_SAMESITE` | `Strict` | Hardens `secunexis_sid` HttpOnly cookie against CSRF. |
+| `ALLOWED_ORIGINS` | `https://<your-app>.onrender.com` | Explicit CORS origin allowlist with `credentials: true`. |
+
+### Post-Deployment Security Checks
+1. Verify `GET /api/soc/events`, `GET /api/soc/alerts`, `GET /api/soc/incidents`, `GET /api/soc/audit`, and `GET /api/auth/users` all return `401 Unauthorized` without a session cookie.
+2. Sign in via the Login Gate, confirm `Set-Cookie` contains `HttpOnly`, `Secure`, and `SameSite=Strict`.
+3. Provision separate `ANALYST` and `VIEWER` accounts in **Users & RBAC**, and verify `VIEWER` receives `403 Forbidden` on alert/incident mutations.
+4. Click **Verify Hash Chain** in **Audit Trail** to confirm SHA-256 chain integrity.
+5. Remove `INITIAL_ADMIN_PASSWORD` from Render Environment Variables after confirming the primary `ADMIN` user is persisted in MongoDB Atlas.
+

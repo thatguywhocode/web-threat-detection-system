@@ -4,9 +4,11 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node tests/regressionTest.js && node tests/socEventsTest.js",
+    "test": "node tests/regressionTest.js && node tests/socEventsTest.js && node tests/socPhase2Test.js && node tests/socSecurityHardeningTest.js",
     "test:regression": "node tests/regressionTest.js",
-    "test:soc": "node tests/socEventsTest.js"
+    "test:soc": "node tests/socEventsTest.js",
+    "test:phase2": "node tests/socPhase2Test.js",
+    "test:security": "node tests/socSecurityHardeningTest.js"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +16,7 @@
   "description": "",
   "dependencies": {
     "axios": "^1.13.2",
+    "bcryptjs": "^3.0.3",
     "cheerio": "^1.1.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
